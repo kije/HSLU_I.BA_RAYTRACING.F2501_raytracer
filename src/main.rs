@@ -1,4 +1,8 @@
+use std::thread;
+use std::thread::sleep;
+use std::time::Duration;
 use minifb::{Key, Window, WindowOptions};
+use rayon::prelude::*;
 
 const WINDOW_WIDTH: usize = 800;
 const WINDOW_HEIGHT: usize = 600;
@@ -18,23 +22,20 @@ fn get_pixel_color(x: usize, y: usize) -> Option<u32> {
     None
 }
 
-fn render_to_buffer() -> [u32; WINDOW_WIDTH * WINDOW_HEIGHT] {
-	let mut buffer: [u32; WINDOW_WIDTH * WINDOW_HEIGHT] = [0x000000; WINDOW_WIDTH * WINDOW_HEIGHT];
+fn render_to_buffer(buffer: &mut [u32; WINDOW_WIDTH * WINDOW_HEIGHT]) {
+    buffer.par_iter_mut().enumerate().for_each(|(i, p)| {
+        let x = i % WINDOW_WIDTH;
+        let y = i / WINDOW_WIDTH;
 
-	for y in 0..WINDOW_HEIGHT {
-		for x in 0..WINDOW_WIDTH {
-			let x_offset = y * WINDOW_WIDTH;
-            if let Some(pixel_color) = get_pixel_color(x, y) {
-                buffer[x_offset+x] = pixel_color;
-            }
-		}
-	}
-
-	buffer
+        if let Some(pixel_color) = get_pixel_color(x, y) {
+            *p = pixel_color;
+        }
+    });
 }
 
 fn main() {
-    let buffer = render_to_buffer();
+    let mut buffer: [u32; WINDOW_WIDTH * WINDOW_HEIGHT] = [0x000000; WINDOW_WIDTH * WINDOW_HEIGHT];
+     render_to_buffer(&mut buffer);
 
     let mut window = Window::new(
         "Minimal Raytracer - Rust",
@@ -47,7 +48,11 @@ fn main() {
     )
     .expect("Unable to open window");
 
+    //let mut i = 0;
     while window.is_open() && !window.is_key_down(Key::Escape) {
         window.update_with_buffer(&buffer, WINDOW_WIDTH, WINDOW_HEIGHT).unwrap();
+        // i += 1;
+        // buffer[i] = 0x00FF00;
+        // thread::sleep(Duration::from_nanos(1_000_000_000 / 60));
     }
 }
