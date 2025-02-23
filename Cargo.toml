@@ -6,4 +6,6 @@ edition = "2024"
 [dependencies]
 minifb = "0.28.0"
 rayon = "1.10.0"
-glamour = "0.16.0"
+mint = "0.5.9"
+ultraviolet = { version = "0.9.2", features = ["mint", "int"] }
+color = "0.2.3"

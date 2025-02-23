@@ -1,29 +1,31 @@
-
+use std::marker::PhantomData;
 use crate::image_buffer::ImageBuffer;
 use crate::renderer::{RenderCoordinates, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::helpers::Pixel;
+use crate::output::OutputColorEncoder;
 
 const CIRCLE_X0: usize = WINDOW_WIDTH / 2;
 const CIRCLE_Y0: usize = WINDOW_HEIGHT / 2;
-const CIRCLE_RADIUS: usize = 80;
+const CIRCLE_RADIUS: usize = WINDOW_WIDTH / 3;
 
-pub(crate) struct TestRenderer;
+#[derive(Debug, Copy, Clone, Default)]
+pub(crate) struct TestRenderer<C: OutputColorEncoder>(PhantomData<C>);
 
-impl TestRenderer {
+impl< C: OutputColorEncoder> TestRenderer<C> {
     fn get_pixel_color(RenderCoordinates { x, y}: RenderCoordinates) -> Option<Pixel> {
         let rel_x = x.abs_diff(CIRCLE_X0);
         let rel_y = y.abs_diff(CIRCLE_Y0);
 
         if rel_x.pow(2) + rel_y.pow(2) <= CIRCLE_RADIUS.pow(2) {
-            return Some((((x as u32%255 ) << 16) | ((y as u32 %255 ) << 8) | 0).into());
+            return Some(Pixel::new((x%255) as u8, (y %255) as u8 , (((x*y) / 7) %255) as u8));
         }
 
         None
     }
 }
 
-impl<const W: usize, const H: usize> Renderer<W, H> for TestRenderer {
+impl<const W: usize, const H: usize, C: OutputColorEncoder> Renderer<W, H, C> for TestRenderer<C> {
     fn render(&self, buffer: &mut ImageBuffer<W, H>)
     where
         [(); W * H]:

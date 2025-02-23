@@ -1,9 +1,26 @@
+use std::ops::Deref;
+use color::{OpaqueColor, Srgb};
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Default)]
-pub(crate) struct Pixel(pub u32);
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub(crate) struct Pixel(pub OpaqueColor<Srgb>);
 
-impl From<u32> for Pixel {
-    fn from(value: u32) -> Self {
-        Self(value)
+impl Pixel {
+    pub fn new(r: u8, g: u8, b: u8) -> Self {
+        Self(OpaqueColor::from_rgb8(r,g,b))
+    }
+}
+
+
+impl From<(u8,u8,u8)> for Pixel {
+    fn from((r,g,b): (u8,u8,u8)) -> Self {
+        Self(OpaqueColor::from_rgb8(r,g,b))
+    }
+}
+
+
+impl Deref for Pixel {
+    type Target = OpaqueColor<Srgb>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
