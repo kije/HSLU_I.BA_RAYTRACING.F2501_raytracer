@@ -47,7 +47,7 @@ impl<const W: usize, const H: usize> OutputInteractive<W, H> for WindowOutput<W,
 
     fn render_loop<F: FnMut(&mut Self::Output, &RenderTiming)>(&mut self, mut cb: F) {
         self.inner.window.update();
-        
+
         let mut timing = RenderTiming::default();
         while self.inner.window.is_open() && !self.inner.window.is_key_down(Key::Escape) {
             cb(&mut self.inner, &timing);
