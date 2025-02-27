@@ -4,8 +4,10 @@ use crate::helpers::Pixel;
 use crate::image_buffer::ImageBuffer;
 
 mod test_renderer;
+mod test_renderer_vector;
 
 pub(crate) use test_renderer::TestRenderer;
+pub(crate) use test_renderer_vector::TestRendererVector;
 use crate::output::OutputColorEncoder;
 
 pub(crate) type RenderCoordinates = Point2<usize>;
