@@ -12,7 +12,7 @@ impl<const W: usize, const H: usize> Output<W, H> for WindowOutputInner<W, H> {
     type ColorEncoder = WindowColorEncoder;
 
     fn render_buffer(&mut self, buffer: &ImageBuffer<W, H>) where [(); W*H]: {
-        self.window.update_with_buffer(buffer.as_ref(), W, H).unwrap()
+        self.window.update_with_buffer(buffer.get_u32_slice(), W, H).unwrap()
     }
 }
 

@@ -26,7 +26,7 @@ impl< C: OutputColorEncoder> TestRenderer<C> {
 }
 
 impl<const W: usize, const H: usize, C: OutputColorEncoder> Renderer<W, H, C> for TestRenderer<C> {
-    fn render(&self, buffer: &mut ImageBuffer<W, H>)
+    fn render(&self, buffer: &ImageBuffer<W, H>)
     where
         [(); W * H]:
     {

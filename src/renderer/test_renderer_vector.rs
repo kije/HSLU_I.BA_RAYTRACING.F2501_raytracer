@@ -26,6 +26,7 @@ static CIRCLE_1: CircleData = CircleData {
     r: WINDOW_WIDTH  as u32 / 4,
     color: OpaqueColor::from_rgb8(255,0,0)
 };
+
 static CIRCLE_2: CircleData = CircleData {
     c: UVec2::new(WINDOW_WIDTH as u32 / 3, 2 * (WINDOW_HEIGHT  as u32 / 3)),
     r: WINDOW_WIDTH  as u32 / 4,
@@ -37,7 +38,6 @@ static CIRCLE_3: CircleData = CircleData {
     r: WINDOW_WIDTH  as u32 / 4,
     color: OpaqueColor::from_rgb8(0,0,255)
 };
-
 
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -60,7 +60,7 @@ impl< C: OutputColorEncoder> TestRendererVector<C> {
 }
 
 impl<const W: usize, const H: usize, C: OutputColorEncoder> Renderer<W, H, C> for TestRendererVector<C> {
-    fn render(&self, buffer: &mut ImageBuffer<W, H>)
+    fn render(&self, buffer: &ImageBuffer<W, H>)
     where
         [(); W * H]:
     {
