@@ -1,6 +1,6 @@
 use crate::output::{Output, OutputColorEncoder, OutputInteractive};
 use minifb::{Key, Window, WindowOptions, Result as WindowResult, Scale};
-use crate::helpers::Pixel;
+use crate::helpers::{Pixel, RenderTiming};
 use crate::image_buffer::ImageBuffer;
 
 #[derive(Debug)]
@@ -9,7 +9,7 @@ pub(crate) struct WindowOutputInner<const W: usize, const H: usize> {
 }
 
 impl<const W: usize, const H: usize> Output<W, H> for WindowOutputInner<W, H> {
-    type ColoEncoder = WindowColorEncoder;
+    type ColorEncoder = WindowColorEncoder;
 
     fn render_buffer(&mut self, buffer: &ImageBuffer<W, H>) where [(); W*H]: {
         self.window.update_with_buffer(buffer.as_ref(), W, H).unwrap()
@@ -45,18 +45,20 @@ impl<const W: usize, const H: usize> WindowOutput<W, H> {
 impl<const W: usize, const H: usize> OutputInteractive<W, H> for WindowOutput<W, H> {
     type Output = WindowOutputInner<W, H>;
 
-    fn render_loop<F: FnMut(&mut Self::Output)>(&mut self, mut cb: F) {
+    fn render_loop<F: FnMut(&mut Self::Output, &RenderTiming)>(&mut self, mut cb: F) {
         self.inner.window.update();
-
+        
+        let mut timing = RenderTiming::default();
         while self.inner.window.is_open() && !self.inner.window.is_key_down(Key::Escape) {
-            cb(&mut self.inner)
+            cb(&mut self.inner, &timing);
+            timing.next();
         }
     }
 
-    fn render_static<F: FnOnce(&mut Self::Output)>(&mut self, cb: F) {
+    fn render_static<F: FnOnce(&mut Self::Output, &RenderTiming)>(&mut self, cb: F, timing: Option<RenderTiming>) {
         self.inner.window.update();
 
-        cb(&mut self.inner);
+        cb(&mut self.inner, &timing.unwrap_or_default());
 
         while self.inner.window.is_open() && !self.inner.window.is_key_down(Key::Escape) {
             self.inner.window.update();

@@ -6,6 +6,7 @@ mod output;
 mod image_buffer;
 mod helpers;
 
+use std::time::{Duration, Instant};
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputInteractive, WindowColorEncoder, WindowOutput};
 use crate::renderer::{Renderer, TestRenderer};
@@ -20,7 +21,7 @@ fn main() {
     
     let mut output = WindowOutput::<WINDOW_WIDTH, WINDOW_HEIGHT>::new().expect("Unable to open output");
 
-    output.render_static(|output| {
+    output.render_static(|output,_| {
         output.render_buffer(&mut buffer);
-    });
+    }, None);
 }
