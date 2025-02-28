@@ -6,9 +6,11 @@ use crate::image_buffer::ImageBuffer;
 
 mod test_renderer;
 mod test_renderer_vector;
+mod test_renderer_3d_sphere_sw02;
 
 pub(crate) use test_renderer::TestRenderer;
 pub(crate) use test_renderer_vector::TestRendererVector;
+pub(crate) use test_renderer_3d_sphere_sw02::TestRenderer3DSphereSW02;
 use crate::output::OutputColorEncoder;
 
 pub(crate) type RenderCoordinates = Point2<usize>;

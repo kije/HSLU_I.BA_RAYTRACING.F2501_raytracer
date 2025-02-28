@@ -10,7 +10,7 @@ use std::sync::{Arc};
 use std::thread;
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputInteractive, WindowColorEncoder, WindowOutput};
-use crate::renderer::{Renderer, TestRendererVector};
+use crate::renderer::{Renderer, TestRenderer3DSphereSW02};
 
 const WINDOW_WIDTH: usize = 1000;
 const WINDOW_HEIGHT: usize = 800;
@@ -21,7 +21,7 @@ fn main() {
 
     let buffer_render = buffer.clone();
     thread::spawn(move || {
-        TestRendererVector::<WindowColorEncoder>::default().render(&buffer_render);
+        TestRenderer3DSphereSW02::<WindowColorEncoder>::default().render(&buffer_render);
     });
 
     
