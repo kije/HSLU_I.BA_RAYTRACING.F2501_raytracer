@@ -1,23 +1,21 @@
+use color::{OpaqueColor, Srgb};
 use std::ops::Deref;
 use std::time::{Duration, Instant};
-use color::{OpaqueColor, Srgb};
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) struct Pixel(pub OpaqueColor<Srgb>);
 
 impl Pixel {
     pub fn new(r: u8, g: u8, b: u8) -> Self {
-        Self(OpaqueColor::from_rgb8(r,g,b))
+        Self(OpaqueColor::from_rgb8(r, g, b))
     }
 }
 
-
-impl From<(u8,u8,u8)> for Pixel {
-    fn from((r,g,b): (u8,u8,u8)) -> Self {
-        Self(OpaqueColor::from_rgb8(r,g,b))
+impl From<(u8, u8, u8)> for Pixel {
+    fn from((r, g, b): (u8, u8, u8)) -> Self {
+        Self(OpaqueColor::from_rgb8(r, g, b))
     }
 }
-
 
 impl Deref for Pixel {
     type Target = OpaqueColor<Srgb>;
@@ -32,7 +30,7 @@ pub(crate) struct RenderTiming {
     pub elapsed_time_since_start: Duration,
     pub delta: Duration,
     last_update_time_since_start: Duration,
-    start_time: Instant
+    start_time: Instant,
 }
 
 impl Default for RenderTiming {

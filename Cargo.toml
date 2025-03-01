@@ -11,3 +11,8 @@ ultraviolet = { version = "0.9", features = ["mint", "int"] }
 color = "0.2"
 wide = "0.7"
 itertools = "0.14"
+
+[features]
+simd_render = []
+simulate_slow_render = []
+high_resolution = []

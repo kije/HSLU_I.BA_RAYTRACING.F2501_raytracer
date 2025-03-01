@@ -1,18 +1,23 @@
-use crate::output::{Output, OutputColorEncoder, OutputInteractive};
-use minifb::{Key, Window, WindowOptions, Result as WindowResult, Scale};
 use crate::helpers::{Pixel, RenderTiming};
 use crate::image_buffer::ImageBuffer;
+use crate::output::{Output, OutputColorEncoder, OutputInteractive};
+use minifb::{Key, Result as WindowResult, Scale, ScaleMode, Window, WindowOptions};
 
 #[derive(Debug)]
 pub(crate) struct WindowOutputInner<const W: usize, const H: usize> {
-    window: Window
+    window: Window,
 }
 
 impl<const W: usize, const H: usize> Output<W, H> for WindowOutputInner<W, H> {
     type ColorEncoder = WindowColorEncoder;
 
-    fn render_buffer(&mut self, buffer: &ImageBuffer<W, H>) where [(); W*H]: {
-        self.window.update_with_buffer(buffer.get_u32_slice(), W, H).unwrap()
+    fn render_buffer(&mut self, buffer: &ImageBuffer<W, H>)
+    where
+        [(); W * H]:,
+    {
+        self.window
+            .update_with_buffer(buffer.get_u32_slice(), W, H)
+            .unwrap()
     }
 }
 
@@ -30,14 +35,16 @@ impl<const W: usize, const H: usize> WindowOutput<W, H> {
                     W,
                     H,
                     WindowOptions {
+                        title: false,
                         resize: false,
                         borderless: true,
                         scale: Scale::FitScreen,
+                        scale_mode: ScaleMode::AspectRatioStretch,
                         transparency: true,
                         ..WindowOptions::default()
                     },
-                )?
-            }
+                )?,
+            },
         })
     }
 }
@@ -55,7 +62,11 @@ impl<const W: usize, const H: usize> OutputInteractive<W, H> for WindowOutput<W,
         }
     }
 
-    fn render_static<F: FnOnce(&mut Self::Output, &RenderTiming)>(&mut self, cb: F, timing: Option<RenderTiming>) {
+    fn render_static<F: FnOnce(&mut Self::Output, &RenderTiming)>(
+        &mut self,
+        cb: F,
+        timing: Option<RenderTiming>,
+    ) {
         self.inner.window.update();
 
         cb(&mut self.inner, &timing.unwrap_or_default());
