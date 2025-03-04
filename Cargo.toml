@@ -12,7 +12,11 @@ color = "0.2"
 wide = "0.7"
 itertools = "0.14"
 
+incr_stats = { version = "1.0", optional = true }
+
 [features]
+default = []
 simd_render = []
 simulate_slow_render = []
+render_timing_debug = ["incr_stats"]
 high_resolution = []
