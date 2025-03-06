@@ -21,7 +21,7 @@ impl Ray {
     pub fn new(origin: Vec3, direction: Vec3) -> Self {
         Self {
             origin,
-            direction,
+            direction: direction.normalized(),
             direction_mag_squared: direction.mag_sq(),
         }
     }
@@ -46,7 +46,7 @@ impl Rayx4 {
     pub fn new(origin: Vec3x4, direction: Vec3x4) -> Self {
         Self {
             origin,
-            direction,
+            direction: direction.normalized(),
             direction_mag_squared: direction.mag_sq(),
         }
     }
@@ -70,7 +70,7 @@ impl Rayx8 {
     pub fn new(origin: Vec3x8, direction: Vec3x8) -> Self {
         Self {
             origin,
-            direction,
+            direction: direction.normalized(),
             direction_mag_squared: direction.mag_sq(),
         }
     }
@@ -130,13 +130,13 @@ macro_rules! intersect_sphere_simd_impl {
             let t1 = (-b - discriminant_sqrt) / a;
             let t1_valid = t1.cmp_gt(F32Type::ZERO) & discriminant_pos;
 
-            let t2 = (-b + discriminant_sqrt) / a;
-            let t2_valid = t2.cmp_gt(F32Type::ZERO) & discriminant_pos;
+            // let t2 = (-b + discriminant_sqrt) / a;
+            // let t2_valid = t2.cmp_gt(F32Type::ZERO) & discriminant_pos;
+            //
+            // let t = t2_valid.blend(t2, RayType::INVALID_VALUE_SPLATTED);
+            // let t = t1_valid.blend(t1, t);
 
-            let t = t2_valid.blend(t2, RayType::INVALID_VALUE_SPLATTED);
-            let t = t1_valid.blend(t1, t);
-
-            // let t = t1_valid.blend(t1, RayType::INVALID_VALUE_SPLATTED);
+            let t = t1_valid.blend(t1, RayType::INVALID_VALUE_SPLATTED);
 
             (ray.at(t), t)
         }
@@ -158,16 +158,16 @@ impl Intersectable for SphereData {
             return None;
         }
 
-        let mut t = (-b - discriminant.sqrt()) / a;
+        let t = (-b - discriminant.sqrt()) / a;
 
-        if t <= 0.0 {
-            let t2 = (-b + discriminant.sqrt()) / a;
-            if t2 > 0.0 {
-                t = t2;
-            } else {
-                return None;
-            }
-        }
+        // if t <= 0.0 {
+        //     let t2 = (-b + discriminant.sqrt()) / a;
+        //     if t2 > 0.0 {
+        //         t = t2;
+        //     } else {
+        //         return None;
+        //     }
+        // }
 
         Some((ray.at(t), t))
     }

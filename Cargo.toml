@@ -7,7 +7,7 @@ edition = "2024"
 minifb = "0.28"
 rayon = "1.10"
 mint = "0.5"
-ultraviolet = { version = "0.9", features = ["mint", "int"] }
+ultraviolet = { version = "0.9", features = ["mint", "int", "f64"] }
 color = "0.2"
 wide = "0.7"
 itertools = "0.14"

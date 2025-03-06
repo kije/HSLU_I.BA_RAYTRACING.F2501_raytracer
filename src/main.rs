@@ -17,14 +17,14 @@ use std::sync::Arc;
 use std::thread;
 
 const WINDOW_WIDTH: usize = if cfg!(feature = "high_resolution") {
-    1600
+    1620
 } else {
-    800
+    768
 };
 const WINDOW_HEIGHT: usize = if cfg!(feature = "high_resolution") {
-    1200
+    1280
 } else {
-    600
+    640
 };
 
 fn main() {
