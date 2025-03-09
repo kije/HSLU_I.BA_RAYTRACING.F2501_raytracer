@@ -1,6 +1,7 @@
 #![feature(generic_const_exprs)]
 #![feature(concat_idents)]
 #![allow(incomplete_features)]
+#![feature(core_intrinsics)]
 
 mod geometry;
 mod helpers;

@@ -5,6 +5,7 @@ use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use color::{OpaqueColor, Srgb};
 use itertools::{Chunk, Itertools, izip};
+use std::intrinsics::{likely, unlikely};
 use std::marker::PhantomData;
 use ultraviolet::{Vec2x4, Vec3, Vec3x4, Vec3x8, f32x4, f32x8};
 use wide::CmpGt;
@@ -120,7 +121,7 @@ macro_rules! intersect_sphere_simd_impl {
 
             let a = 2.0 * ray.direction_mag_squared; // u dot u
             let b = 2.0 * u.dot(v);
-            let c = v.dot(v) - self.r_sq;
+            let c = v.dot(v) - F32Type::splat(self.r_sq);
 
             let discriminant = b * b - 2.0 * a * c;
 
@@ -325,11 +326,11 @@ impl<C: OutputColorEncoder> TestRenderer3DSphereSW02<C> {
 
 
 
-            if len == 8 {
+            if likely(len == 8) {
                 impl_render_pixel_colors_simd!(intersect_x8, x8, xs, ys, zs, idxs, set_pixel);
-            } else if len == 4 {
+            } else if unlikely(len == 4) {
                 impl_render_pixel_colors_simd!(intersect_x4, x4, xs, ys, zs, idxs, set_pixel);
-            } else {
+            }  else {
                 izip!(
                     xs.iter(),
                     ys.iter(),
