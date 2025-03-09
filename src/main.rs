@@ -13,7 +13,7 @@ mod renderer;
 use crate::helpers::RenderTiming;
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputInteractive, WindowColorEncoder, WindowOutput};
-use crate::renderer::{Renderer, TestRenderer3DSphereSW02};
+use crate::renderer::{Renderer, TestRenderer3DLightColorSW03};
 use std::sync::Arc;
 use std::thread;
 
@@ -34,7 +34,7 @@ fn main() {
     let buffer_render = buffer.clone();
     thread::spawn(move || {
         let mut start = RenderTiming::default();
-        TestRenderer3DSphereSW02::<WindowColorEncoder>::default().render(&buffer_render);
+        TestRenderer3DLightColorSW03::<WindowColorEncoder>::default().render(&buffer_render);
         start.next();
         println!("Render timing done! {:?}", start);
     });

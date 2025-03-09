@@ -17,11 +17,13 @@ use std::time::Instant;
 
 mod test_renderer;
 mod test_renderer_3d_sphere_sw02;
+mod test_renderer_light_color_sw03;
 mod test_renderer_vector;
 
 use crate::output::OutputColorEncoder;
 pub(crate) use test_renderer::TestRenderer;
 pub(crate) use test_renderer_3d_sphere_sw02::TestRenderer3DSphereSW02;
+pub(crate) use test_renderer_light_color_sw03::TestRenderer3DLightColorSW03;
 pub(crate) use test_renderer_vector::TestRendererVector;
 
 pub(crate) type RenderCoordinates = Point2<usize>;
