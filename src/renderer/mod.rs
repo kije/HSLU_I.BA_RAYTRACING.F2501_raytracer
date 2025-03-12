@@ -77,22 +77,23 @@ pub(crate) fn print_render_stats(render_times: &[f64]) {
 }
 
 pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
+    const RENDER_STRIDE: usize = const {
+        (W / 32)
+            .next_multiple_of(64 / mem::size_of::<u32>())
+            .next_multiple_of(8)
+        // align to vectorized x8 size and cache lines to avoid false sharing
+    };
+
     fn render(&self, buffer: &ImageBuffer<W, H>)
     where
         [(); W * H]:;
-
-    fn render_chunk_size() -> usize {
-        (W / 32)
-            .next_multiple_of(64 / mem::size_of::<u32>())
-            .next_multiple_of(8) // align to vectorized x8 size and cache lines to avoid false sharing
-    }
 
     fn render_to_buffer<F>(buffer: &ImageBuffer<W, H>, cb: F)
     where
         [(); W * H]:,
         F: (Fn(RenderCoordinates) -> Option<Pixel>) + Sync,
     {
-        let chunk_size = Self::render_chunk_size();
+        let chunk_size = Self::RENDER_STRIDE;
 
         #[cfg(feature = "render_timing_debug")]
         let render_times = Arc::new(Mutex::new(Vec::with_capacity(
@@ -140,7 +141,7 @@ pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder>
         [(); W * H]:,
         F: Fn(RenderCoordinatesVectorized, &dyn Fn(usize, Pixel)) + Sync,
     {
-        let chunk_size = Self::render_chunk_size();
+        let chunk_size = Self::RENDER_STRIDE;
 
         #[cfg(feature = "render_timing_debug")]
         let render_times = Arc::new(Mutex::new(Vec::with_capacity(
@@ -159,12 +160,10 @@ pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder>
 
                     let chunk_offset = chunk_index * chunk_size;
 
-                    let indexes = p.iter().enumerate().map(|(j, _)| j);
+                    let indexes = (0..p.len()).map(|j| (j, chunk_offset + j));
 
                     let (i, x, y): (Vec<usize>, Vec<f32>, Vec<f32>) = indexes
-                        .map(|j| {
-                            let pixel_offset = chunk_offset + j;
-
+                        .map(|(j, pixel_offset)| {
                             (j, (pixel_offset % W) as f32, (pixel_offset / W) as f32)
                         })
                         .collect();
