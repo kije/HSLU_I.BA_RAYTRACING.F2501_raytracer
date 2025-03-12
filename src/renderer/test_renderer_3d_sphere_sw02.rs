@@ -1,10 +1,11 @@
-use crate::helpers::Pixel;
+use crate::helpers::{ColorType, Pixel};
 use crate::image_buffer::ImageBuffer;
 use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
-use color::{OpaqueColor, Srgb};
 use itertools::{Chunk, Itertools, izip};
+use palette::Darken;
+use palette::blend::Blend;
 use std::intrinsics::{likely, unlikely};
 use std::marker::PhantomData;
 use ultraviolet::{Vec2x4, Vec3, Vec3x4, Vec3x8, f32x4, f32x8};
@@ -92,11 +93,11 @@ struct SphereData {
     c: Vec3,
     r_sq: f32,
     r_inv: f32,
-    color: OpaqueColor<Srgb>,
+    color: ColorType,
 }
 
 impl SphereData {
-    const fn new(c: Vec3, r: f32, color: OpaqueColor<Srgb>) -> Self {
+    const fn new(c: Vec3, r: f32, color: ColorType) -> Self {
         Self {
             c,
             r_sq: r * r,
@@ -180,13 +181,13 @@ impl Intersectable for SphereData {
 static SPHERE_1: SphereData = SphereData::new(
     Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
     70.0,
-    OpaqueColor::from_rgb8(255, 0, 0),
+    ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
 );
 
 static SPHERE_2: SphereData = SphereData::new(
     Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
     90.0,
-    OpaqueColor::from_rgb8(0, 255, 0),
+    ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
 );
 
 static SPHERE_3: SphereData = SphereData::new(
@@ -196,7 +197,7 @@ static SPHERE_3: SphereData = SphereData::new(
         150.0,
     ),
     90.0,
-    OpaqueColor::from_rgb8(0, 0, 255),
+    ColorType::new(0.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
 );
 
 static SPHERE_4: SphereData = SphereData::new(
@@ -206,7 +207,7 @@ static SPHERE_4: SphereData = SphereData::new(
         250.0,
     ),
     120.0,
-    OpaqueColor::from_rgb8(158, 0, 255),
+    ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
 );
 
 static SPHERE_5: SphereData = SphereData::new(
@@ -216,7 +217,7 @@ static SPHERE_5: SphereData = SphereData::new(
         90.0,
     ),
     30.0,
-    OpaqueColor::from_rgb8(128, 210, 255),
+    ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
 );
 
 static SPHERE_6: SphereData = SphereData::new(
@@ -226,7 +227,7 @@ static SPHERE_6: SphereData = SphereData::new(
         500.0,
     ),
     250.0,
-    OpaqueColor::from_rgb8(254, 255, 255),
+    ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
 );
 
 static SPHERE_7: SphereData = SphereData::new(
@@ -236,7 +237,7 @@ static SPHERE_7: SphereData = SphereData::new(
         20.0,
     ),
     10.0,
-    OpaqueColor::from_rgb8(255, 55, 77),
+    ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
 );
 
 static SPHERE_8: SphereData = SphereData::new(
@@ -246,7 +247,7 @@ static SPHERE_8: SphereData = SphereData::new(
         30.0,
     ),
     25.0,
-    OpaqueColor::from_rgb8(55, 230, 180),
+    ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
 );
 
 static SPHERES: [&'static SphereData; 8] = [
@@ -262,12 +263,12 @@ impl<C: OutputColorEncoder> TestRenderer3DSphereSW02<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
         let ray = Ray::new(Vec3::new(x as f32, y as f32, 0.0), RENDER_RAY_DIRECTION);
 
-        let mut pixel_color: Option<(f32, OpaqueColor<Srgb>)> = None;
+        let mut pixel_color: Option<(f32, ColorType)> = None;
 
         for sphere in SPHERES {
             if let Some((_, distance)) = sphere.intersect(&ray) {
                 let d = distance / sphere.c.mag();
-                let color = sphere.color.map_lightness(|l| l - 2.0 * d);
+                let color = sphere.color.darken_fixed(2.0 * d);
                 if let Some((prev_dist, _)) = pixel_color {
                     if prev_dist > distance {
                         pixel_color = Some((distance, color));
@@ -316,7 +317,7 @@ impl<C: OutputColorEncoder> TestRenderer3DSphereSW02<C> {
                             if  min_distances[i] > v {
                                 min_distances[i] = v;
                                 if v.is_finite() && !v.is_nan()  {
-                                    $set_pixel($idxs[i], Pixel(sphere.color.map_lightness(|l| l - 2.0 * v)));
+                                    $set_pixel($idxs[i], Pixel(sphere.color.darken_fixed(2.0 * v)));
                                 }
                             }
                         }
