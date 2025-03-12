@@ -8,7 +8,11 @@ minifb = "0.28"
 rayon = "1.10"
 mint = "0.5"
 ultraviolet = { version = "0.9", features = ["mint", "int", "f64"] }
-color = "0.2"
+
+palette = { version = "0.7", features = ["wide"] }
+
+# todo also optimize and use https://docs.rs/simba/0.9.0/simba/
+
 wide = "0.7"
 itertools = "0.14"
 

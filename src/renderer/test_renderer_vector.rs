@@ -1,16 +1,15 @@
-use crate::helpers::Pixel;
+use crate::helpers::{ColorType, Pixel};
 use crate::image_buffer::ImageBuffer;
 use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
-use color::{OpaqueColor, Srgb};
 use std::marker::PhantomData;
 use ultraviolet::UVec2;
 
 struct CircleData {
     c: UVec2,
     r: u32,
-    color: OpaqueColor<Srgb>,
+    color: ColorType,
 }
 
 impl CircleData {
@@ -24,13 +23,13 @@ impl CircleData {
 static CIRCLE_1: CircleData = CircleData {
     c: UVec2::new(WINDOW_WIDTH as u32 / 2, WINDOW_HEIGHT as u32 / 3),
     r: WINDOW_WIDTH as u32 / 4,
-    color: OpaqueColor::from_rgb8(255, 0, 0),
+    color: ColorType::new(255.0 / 255.0, 0. / 255.0, 0. / 255.0),
 };
 
 static CIRCLE_2: CircleData = CircleData {
     c: UVec2::new(WINDOW_WIDTH as u32 / 3, 2 * (WINDOW_HEIGHT as u32 / 3)),
     r: WINDOW_WIDTH as u32 / 4,
-    color: OpaqueColor::from_rgb8(0, 255, 0),
+    color: ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
 };
 
 static CIRCLE_3: CircleData = CircleData {
@@ -39,7 +38,7 @@ static CIRCLE_3: CircleData = CircleData {
         2 * (WINDOW_HEIGHT as u32 / 3),
     ),
     r: WINDOW_WIDTH as u32 / 4,
-    color: OpaqueColor::from_rgb8(0, 0, 255),
+    color: ColorType::new(0.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
 };
 
 #[derive(Debug, Copy, Clone, Default)]
@@ -49,7 +48,7 @@ impl<C: OutputColorEncoder> TestRendererVector<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
         let p = UVec2::new(x as u32, y as u32);
 
-        let mut pixel_color: Option<OpaqueColor<Srgb>> = None;
+        let mut pixel_color: Option<ColorType> = None;
 
         for circle in [&CIRCLE_1, &CIRCLE_2, &CIRCLE_3] {
             if circle.is_inside(p) {

@@ -2,6 +2,7 @@ use crate::helpers::{Pixel, RenderTiming};
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputColorEncoder, OutputInteractive};
 use minifb::{Key, Result as WindowResult, Scale, ScaleMode, Window, WindowOptions};
+use palette::{Srgb, rgb};
 
 #[derive(Debug)]
 pub(crate) struct WindowOutputInner<const W: usize, const H: usize> {
@@ -83,8 +84,6 @@ pub(crate) struct WindowColorEncoder;
 impl OutputColorEncoder for WindowColorEncoder {
     #[inline(always)]
     fn to_output(pixel: &Pixel) -> u32 {
-        let mut x = pixel.0.to_rgba8().to_u8_array();
-        x.rotate_right(1);
-        u32::from_be_bytes(x)
+        u32::from(pixel.0.into_format::<u8>())
     }
 }

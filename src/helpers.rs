@@ -1,24 +1,25 @@
-use color::{OpaqueColor, Srgb};
+use palette::rgb::Srgb;
 use std::ops::Deref;
 use std::time::{Duration, Instant};
 
+pub(crate) type ColorType<T = f32> = Srgb<T>;
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub(crate) struct Pixel(pub OpaqueColor<Srgb>);
+pub(crate) struct Pixel(pub ColorType);
 
 impl Pixel {
     pub fn new(r: u8, g: u8, b: u8) -> Self {
-        Self(OpaqueColor::from_rgb8(r, g, b))
+        Self(ColorType::new(r, g, b).into_format())
     }
 }
 
 impl From<(u8, u8, u8)> for Pixel {
     fn from((r, g, b): (u8, u8, u8)) -> Self {
-        Self(OpaqueColor::from_rgb8(r, g, b))
+        Self::new(r, g, b)
     }
 }
 
 impl Deref for Pixel {
-    type Target = OpaqueColor<Srgb>;
+    type Target = Srgb;
     fn deref(&self) -> &Self::Target {
         &self.0
     }
