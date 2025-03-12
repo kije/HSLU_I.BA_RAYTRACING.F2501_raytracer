@@ -23,6 +23,7 @@ where
 {
     /// Distance from ray origin
     t: Scalar,
+    estimated_distance_sq: Scalar,
     valid_mask: ValidMask,
     payload: Payload,
 }
@@ -33,9 +34,15 @@ where
     ValidMask: Copy,
     Payload: Sized,
 {
-    const fn new(t: Scalar, payload: Payload, valid_mask: ValidMask) -> Self {
+    const fn new(
+        t: Scalar,
+        estimated_distance_sq: Scalar,
+        payload: Payload,
+        valid_mask: ValidMask,
+    ) -> Self {
         Self {
             t,
+            estimated_distance_sq,
             valid_mask,
             payload,
         }
@@ -323,7 +330,7 @@ macro_rules! intersect_sphere_simd_impl {
                 // not needed, do belnding only at the end?
                 // let t = discriminant_pos.blend(t1, RayType::INVALID_VALUE_SPLATTED);
 
-                RayIntersectionCandidate::new(t1, payload, t1_valid)
+                RayIntersectionCandidate::new(t1, (t1 * u).mag_sq(), payload, t1_valid)
             }
 
             fn intersect<'a>(
@@ -416,7 +423,12 @@ impl Intersectable for SphereData<Vec3, f32> {
         //     }
         // }
 
-        Some(RayIntersectionCandidate::new(t, payload, ()))
+        Some(RayIntersectionCandidate::new(
+            t,
+            (t * u).mag_sq(),
+            payload,
+            (),
+        ))
     }
     fn intersect<'a>(
         &'a self,
@@ -577,44 +589,38 @@ static SPHERES: LazyLock<[SphereData<Vec3, f32>; 16]> = LazyLock::new(|| {
     ]
 });
 
-static SPHERES_x4: LazyLock<[SphereData<Vec3x4, f32x4>; 2]> = LazyLock::new(|| {
-    // fixme grouping like this likely needs to happen at runtime?
-    SPHERES
-        .chunks(4)
-        .map(|c| {
-            SphereData::new(
-                Vec3x4::from(c.iter().map(|x| x.c).collect_array::<4>().unwrap()),
-                f32x4::from(
-                    c.iter()
-                        .map(|x| 1.0 / x.r_inv)
-                        .collect_array::<4>()
-                        .unwrap(),
-                ),
-                c.get(0).unwrap().color,
-            )
-        })
-        .collect_array::<2>()
-        .unwrap()
-});
+const N_RANDOM_SPHERES: usize = 2_000;
+static SPHERES_RANDOM: LazyLock<[SphereData<Vec3, f32>; N_RANDOM_SPHERES]> = LazyLock::new(|| {
+    (0..N_RANDOM_SPHERES)
+        .map(|i| {
+            let rnd =
+                f32::from(((i % 255) + ((i / 23) % 255) + ((i / 4) % 255)) as u16) / (255.0 * 3.0);
+            let rnd2 = f32::from(
+                (((i / 5) % 255) + ((i / 17) % 255) + ((i / 2) % 255) + (((i + 1) / 9) % 255))
+                    as u16,
+            ) / (255.0 * 4.0);
 
-static SPHERES_x8: LazyLock<[SphereData<Vec3x8, f32x8>; 2]> = LazyLock::new(|| {
-    // fixme grouping like this likely needs to happen at runtime?
-    SPHERES
-        .chunks(8)
-        .map(|c| {
+            let pol = if rnd < rnd2 { -1.0 } else { 1.0 };
+
+            let r = rnd * 75.0;
             SphereData::new(
-                Vec3x8::from(c.iter().map(|x| x.c).collect_array::<8>().unwrap()),
-                f32x8::from(
-                    c.iter()
-                        .map(|x| 1.0 / x.r_inv)
-                        .collect_array::<8>()
-                        .unwrap(),
+                Vec3::new(
+                    (((i * 50) % WINDOW_WIDTH) as f32).max(r),
+                    (((((WINDOW_HEIGHT / ((i % 45) + 1)) + 100) % WINDOW_HEIGHT) as f32) * 2.5)
+                        % WINDOW_HEIGHT as f32,
+                    (25.2 + (pol * rnd * (WINDOW_HEIGHT as f32 / 1.66))).max(r),
                 ),
-                c.get(0).unwrap().color,
+                r,
+                OpaqueColor::from_rgb8(
+                    ((i / 8) % 255) as u8,
+                    ((i / 3) % 255) as u8,
+                    ((i * 8) % 255) as u8,
+                )
+                .map_lightness(|l| l.max(0.18).min(0.72)),
             )
         })
-        .collect_array::<2>()
-        .unwrap()
+        .collect_array::<N_RANDOM_SPHERES>()
+        .expect("N_RANDOM_SPHERES")
 });
 
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
@@ -626,20 +632,23 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
         let ray = Ray::new(Vec3::new(x as f32, y as f32, 0.0), RENDER_RAY_DIRECTION);
 
-        let nearest_intersection = SPHERES.iter().fold(None, |nearest_intersection, sphere| {
-            let intersection = sphere.check_intersection(&ray, sphere);
+        let nearest_intersection =
+            SPHERES_RANDOM
+                .iter()
+                .fold(None, |nearest_intersection, sphere| {
+                    let intersection = sphere.check_intersection(&ray, sphere);
 
-            match (nearest_intersection, intersection) {
-                (None, intersection) => intersection,
-                (nearest_intersection, None) => nearest_intersection,
-                (Some(nearest_intersection), Some(intersection))
-                    if intersection.t > nearest_intersection.t =>
-                {
-                    Some(nearest_intersection)
-                }
-                (Some(_), intersection) => intersection,
-            }
-        })?;
+                    match (nearest_intersection, intersection) {
+                        (None, intersection) => intersection,
+                        (nearest_intersection, None) => nearest_intersection,
+                        (Some(nearest_intersection), Some(intersection))
+                            if intersection.t > nearest_intersection.t =>
+                        {
+                            Some(nearest_intersection)
+                        }
+                        (Some(_), intersection) => intersection,
+                    }
+                })?;
 
         let intersection_object = nearest_intersection.payload;
 
@@ -683,7 +692,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
 
                     let mut min_distances = vec![f32::INFINITY; $idxs.len()];
 
-                    for sphere in SPHERES {
+                    for sphere in SPHERES_RANDOM {
                         let RayIntersection { distance: distances, .. } = sphere.$fnname(&ray);
 
                         let d = distances / sphere.c.mag();
@@ -702,7 +711,6 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
 
             if likely(len == 8) {
                 let coords = Vec3x8::new(f32x8::from(xs), f32x8::from(ys), f32x8::from(zs));
-                let coords_2d = coords.xy();
                 let ray = Rayx8::new(
                     coords,
                     Vec3x8::unit_z(),
@@ -714,38 +722,37 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                 // then we can calculate at once the intersection angle etc.. for the entire ray bundle (x8) via spheres.intersection(ray), where spheres is the x8 variant of all intersections
                 // we later will need to generalie this approach so it supports not only spheres -> enum ObjectType {Sphere(SphereData), Plana(PlaneData), ...} -> so we have a homogenious data structure to accumulate intersections on...
 
-                let mut pixel_colors = [None; 8];
-                for sphere in SPHERES.iter() {
-                    let sphere_x8 = SphereData::<Vec3x8,f32x8>::splat(sphere);
-                    let intersection: RayIntersectionCandidate<f32x8, _, m32x8> = sphere_x8.check_intersection(&ray, sphere_x8);
+                // let mut pixel_colors = [None; 8];
+                // for sphere in SPHERES_RANDOM.iter() {
+                //     let sphere_x8 = SphereData::<Vec3x8,f32x8>::splat(sphere);
+                //     let intersection: RayIntersectionCandidate<f32x8, _, m32x8> = sphere_x8.check_intersection(&ray, sphere_x8);
+                //
+                //     let d = intersection.t / sphere.c.mag();
+                //     let d = intersection.valid_mask.blend(d, Rayx8::INVALID_VALUE_SPLATTED);
+                //
+                //     for (pixel_index, &v) in d.as_array_ref().iter().enumerate().filter(|&(_, &v)| !v.is_nan() && v.is_finite() && v >= 0.0 && v != Rayx8::INVALID_VALUE) {
+                //         pixel_colors[pixel_index] = Some(Pixel(
+                //             sphere.color.map_lightness(|l| l - 1.25 * v),
+                //         ));
+                //     }
+                // }
+                // for (pixel_index, pixel_color) in pixel_colors.into_iter().enumerate() {
+                //     if let Some(color) = pixel_color {
+                //         set_pixel(idxs[pixel_index], color);
+                //     }
+                // }
+                // return;
 
-                    let d = intersection.t / sphere.c.mag();
-                    let d = intersection.valid_mask.blend(d, Rayx8::INVALID_VALUE_SPLATTED);
-
-                    for (pixel_index, &v) in d.as_array_ref().iter().enumerate().filter(|&(_, &v)| !v.is_nan() && v.is_finite() && v >= 0.0 && v != Rayx8::INVALID_VALUE) {
-                        let p_idx = idxs[pixel_index];
-                        println!("{pixel_index} / {p_idx}");
-                        pixel_colors[pixel_index] = Some(Pixel(
-                            sphere.color //.map_lightness(|l| l - 2.0 * v),
-                        ));
-                    }
-                }
-                for (pixel_index, pixel_color) in pixel_colors.into_iter().enumerate() {
-                    if let Some(color) = pixel_color {
-                        set_pixel(idxs[pixel_index], color);
-                    }
-                }
-                return;
-
-                let nearest_intersection = SPHERES_x8.iter().fold(None, |nearest_intersection, sphere| {
-                    let intersection: RayIntersectionCandidate<f32x8, _, m32x8> = sphere.check_intersection(&ray, Cow::Borrowed(sphere));
+                let nearest_intersection = SPHERES.iter().fold(None, |nearest_intersection: Option<_>, sphere| {
+                    let sphere = SphereData::<Vec3x8, f32x8>::splat(sphere);
+                    let intersection: RayIntersectionCandidate<f32x8, _, m32x8> = sphere.check_intersection(&ray, Cow::Owned(sphere));
 
 
-                    let i_has_more_than_one_intersection = intersection.valid_mask.move_mask() & (intersection.valid_mask.move_mask() - 1) > 0;
-
-                    if (i_has_more_than_one_intersection) {
-                        //println!("{coords_2d:?}: \t Intersection {intersection:?} has more than one intersection");
-                    }
+                    // let i_has_more_than_one_intersection = intersection.valid_mask.move_mask() & (intersection.valid_mask.move_mask() - 1) > 0;
+                    //
+                    // if (i_has_more_than_one_intersection) {
+                    //     //println!("{coords_2d:?}: \t Intersection {intersection:?} has more than one intersection");
+                    // }
 
                     //println!("{:?} / {:?}", nearest_intersection.clone().map(|x: RayIntersectionCandidate<f32x8, _, m32x8>| x.valid_mask), intersection.valid_mask);
 
@@ -762,8 +769,8 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                         return Some(intersection);
                     };
 
-                    let ni_has_more_than_one_intersection = nearest_intersection.valid_mask.move_mask() & (nearest_intersection.valid_mask.move_mask() - 1) > 0;
-
+                    // let ni_has_more_than_one_intersection = nearest_intersection.valid_mask.move_mask() & (nearest_intersection.valid_mask.move_mask() - 1) > 0;
+                    //
 
                     // if nearest_intersection has no intersections, return current intersection (as this is by now guaranteed to have at least one intersection)
                     if nearest_intersection.valid_mask.none() {
@@ -771,13 +778,15 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                         return Some(intersection);
                     }
 
-                    let intersection_has_lower_value = nearest_intersection.t.cmp_ge(intersection.t);
+                    let nearest_intersection_has_lower_value = intersection.estimated_distance_sq.cmp_ge(nearest_intersection.estimated_distance_sq);
+                    let intersection_has_lower_value = nearest_intersection.estimated_distance_sq.cmp_gt(intersection.estimated_distance_sq);
 
-                    if intersection_has_lower_value.none() {
+                    if nearest_intersection_has_lower_value.all() {
                         return Some(nearest_intersection);
-                    } else if intersection_has_lower_value.all() {
+                    } else if nearest_intersection_has_lower_value.none() {
                         return Some(intersection);
                     }
+
 
                     // now the complex case:
                     // we need to merge the two intersections
@@ -800,33 +809,39 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
 
 
                     let mut new_t = valid_both.blend(
-                        intersection_has_lower_value.blend(intersection.t, nearest_intersection.t),
+                        nearest_intersection_has_lower_value.blend(nearest_intersection.t, intersection.t),
                         Rayx8::INVALID_VALUE_SPLATTED,
                     );
                     new_t = valid_only_intersection.blend(intersection.t, new_t);
                     new_t = valid_only_nearest_intersection.blend(nearest_intersection.t, new_t);
 
-                    let intersection_has_lower_value = intersection_has_lower_value;
+                    let mut new_estimated_dist = valid_both.blend(
+                        nearest_intersection_has_lower_value.blend(nearest_intersection.estimated_distance_sq, intersection.estimated_distance_sq),
+                        Rayx8::INVALID_VALUE_SPLATTED,
+                    );
+                    new_estimated_dist = valid_only_intersection.blend(intersection.estimated_distance_sq, new_estimated_dist);
+                    new_estimated_dist = valid_only_nearest_intersection.blend(nearest_intersection.estimated_distance_sq, new_estimated_dist);
 
-                    let new_payload = SphereData::<Vec3x8, f32x8>::blend(intersection_has_lower_value, &intersection.payload, &nearest_intersection.payload);
 
-                    if (i_has_more_than_one_intersection || ni_has_more_than_one_intersection) && (intersection_valid_mask.move_mask() != nearest_intersection_valid_mask.move_mask()) {
-                        println!("------\n\
-i_valid: {intersection_valid_mask:?} \t / \t {nearest_intersection_valid_mask:?}\n\
-both: {valid_both:?}\n\
-eiter: {valid_either:?}\n\
-exclusive: {valid_exclusive:?}\n\
-only_i: {valid_only_intersection:?}\n\
-only_ni: {valid_only_nearest_intersection:?}\n\
-lower_val_i: {intersection_has_lower_value:?}\n
-new_t: {new_t:?}\n\
-new_payload: {new_payload:?}\n\
-------
-");
-                    }
+                    let new_payload = SphereData::<Vec3x8, f32x8>::blend(nearest_intersection_has_lower_value, &nearest_intersection.payload, &intersection.payload);
+
+                    //                     if (i_has_more_than_one_intersection || ni_has_more_than_one_intersection) && (intersection_valid_mask.move_mask() != nearest_intersection_valid_mask.move_mask()) {
+                    //                         println!("------\n\
+                    // i_valid: {intersection_valid_mask:?} \t / \t {nearest_intersection_valid_mask:?}\n\
+                    // both: {valid_both:?}\n\
+                    // eiter: {valid_either:?}\n\
+                    // exclusive: {valid_exclusive:?}\n\
+                    // only_i: {valid_only_intersection:?}\n\
+                    // only_ni: {valid_only_nearest_intersection:?}\n\
+                    // lower_val_i: {intersection_has_lower_value:?}\n
+                    // new_t: {new_t:?}\n\
+                    // new_payload: {new_payload:?}\n\
+                    // ------
+                    // ");
+                    //                     }
                     //println!("{nearest_intersection:?} + {intersection:?}: {new_t:?} / {new_payload:?} / {valid_either:?}");
 
-                    Some(RayIntersectionCandidate::new(new_t, Cow::Owned(new_payload), valid_either))
+                    Some(RayIntersectionCandidate::new(new_t, new_estimated_dist, Cow::Owned(new_payload), valid_either))
                 });
 
                 let Some(nearest_intersection) = nearest_intersection else {
@@ -846,7 +861,7 @@ new_payload: {new_payload:?}\n\
                     incident_angle_cos,
                     valid_mask,
                     ..
-                } = nearest_intersection.payload.intersect(&ray, &RayIntersectionCandidate::new(nearest_intersection.t, nearest_intersection.payload.as_ref(), nearest_intersection.valid_mask));
+                } = nearest_intersection.payload.intersect(&ray, &RayIntersectionCandidate::new(nearest_intersection.t, nearest_intersection.estimated_distance_sq, nearest_intersection.payload.as_ref(), nearest_intersection.valid_mask));
                 //
                 // // println!("cos(theta) = {}", incident_angle_cos);
                 let d = distance / nearest_intersection.payload.c.mag();
@@ -854,9 +869,9 @@ new_payload: {new_payload:?}\n\
 
                 //println!("{d:?}");
 
-                for (pixel_index, &v) in d.as_array_ref().iter().enumerate().filter(|&(_, &v)| !v.is_nan() && v.is_finite() && v >= 0.0 && v != Rayx8::INVALID_VALUE) {
+                for (pixel_index, &v) in d.as_array_ref().iter().enumerate().filter(|&(_, &v)| v.is_finite() && v >= 0.0 && v != Rayx8::INVALID_VALUE) {
                     set_pixel(idxs[pixel_index], Pixel(
-                        nearest_intersection.payload.color //.map_lightness(|l| l - 2.0 * v),
+                        nearest_intersection.payload.color.map_lightness(|l| l - 2.0 * v),
                     ));
                 }
 
