@@ -54,3 +54,33 @@ impl RenderTiming {
         self.iteration += 1;
     }
 }
+
+#[inline(always)]
+pub(crate) const fn fast_inverse(value: f32) -> f32 {
+    debug_assert!(value >= 0.0);
+    f32::from_bits(0x7f00_0000 - value.to_bits())
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_fast_inverse() {
+        for i in 1..1000_000 {
+            let v = i as f32 / 9.25;
+            let v = v * 20.0;
+
+            let v_inv = 1.0 / v;
+            let v_inv_fast = fast_inverse(v);
+
+            assert!(
+                (v_inv - v_inv_fast).abs() < 0.05,
+                "{} != {} (episoln {})",
+                v_inv,
+                v_inv_fast,
+                (v_inv - v_inv_fast).abs()
+            );
+        }
+    }
+}

@@ -305,16 +305,25 @@ macro_rules! intersect_sphere_simd_impl {
                 let u = ray.direction;
                 let v = ray.origin - self.c;
 
+                // FIXME if  we garantuee ray direction is normalized, we can avoid multiplying by direction_mag_squared here, as it will be 1 anyways => a = 2.0
+                // CHATGPT:
+                // Diskriminant Δ=(2(u⋅v))^2 − 4(v⋅v−r^2)
+                // You can factor out common terms (like the constant 4) and simplify the square root and division. This may let you avoid some multiplications and divisions in the inner loop.
+                // this then further down leads to the optimization that we can calculate the inverse of a (maybe use the fast inverse from minmath crate) and convert the division by a futher down t a multiplication by inv_a -> multiplication is generally faster than division
+                //let a = 2.0 * ray.direction_mag_squared; // u dot u
                 let a = 2.0 * ray.direction_mag_squared; // u dot u
+                let a_inv = a.recip(); // crate::helpers::fast_inverse(a);
                 let b = 2.0 * u.dot(v);
                 let c = v.dot(v) - self.r_sq;
 
-                let discriminant = b * b - (2.0 * a * c);
+                let discriminant = b * b - (a * (2.0 * c));
 
                 let discriminant_pos = discriminant.cmp_ge(F32Type::ZERO);
                 let discriminant_sqrt = discriminant.sqrt();
 
-                let t1 = (-b - discriminant_sqrt) / a;
+                // FIXME optimize by replacing / a by * inv_a
+                //let t1 = (-b - discriminant_sqrt) / a;
+                let t1 = (-b - discriminant_sqrt) * a_inv;
 
                 let t1_valid = t1.cmp_ge(F32Type::ZERO) & discriminant_pos;
                 //println!("{discriminant:?}: \t {discriminant_pos:?} | {t1_valid:?}");
@@ -330,7 +339,9 @@ macro_rules! intersect_sphere_simd_impl {
                 // not needed, do belnding only at the end?
                 // let t = discriminant_pos.blend(t1, RayType::INVALID_VALUE_SPLATTED);
 
-                RayIntersectionCandidate::new(t1, (t1 * u).mag_sq(), payload, t1_valid)
+                let estimated_distance = t1 * t1 * ray.direction_mag_squared;
+
+                RayIntersectionCandidate::new(t1, estimated_distance, payload, t1_valid)
             }
 
             fn intersect<'a>(
@@ -525,7 +536,7 @@ static SPHERES: LazyLock<[SphereData<Vec3, f32>; 16]> = LazyLock::new(|| {
         SphereData::new(
             Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
             90.0,
-            OpaqueColor::from_rgb8(0, 255, 0),
+            ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0  / 255.0),,
         ),
         SphereData::new(
             Vec3::new(
@@ -743,7 +754,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                 // }
                 // return;
 
-                let nearest_intersection = SPHERES.iter().fold(None, |nearest_intersection: Option<_>, sphere| {
+                let nearest_intersection = SPHERES_RANDOM.iter().fold(None, |nearest_intersection: Option<_>, sphere| {
                     let sphere = SphereData::<Vec3x8, f32x8>::splat(sphere);
                     let intersection: RayIntersectionCandidate<f32x8, _, m32x8> = sphere.check_intersection(&ray, Cow::Owned(sphere));
 
@@ -779,7 +790,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                     }
 
                     let nearest_intersection_has_lower_value = intersection.estimated_distance_sq.cmp_ge(nearest_intersection.estimated_distance_sq);
-                    let intersection_has_lower_value = nearest_intersection.estimated_distance_sq.cmp_gt(intersection.estimated_distance_sq);
+                    // let intersection_has_lower_value = nearest_intersection.estimated_distance_sq.cmp_gt(intersection.estimated_distance_sq);
 
                     if nearest_intersection_has_lower_value.all() {
                         return Some(nearest_intersection);
@@ -795,51 +806,31 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                     // for the values where only one of the valid maks are true (xor both valiud masks), take the one
                     // from the intersection where it is true
 
-                    // todo
 
-                    let intersection_valid_mask = intersection.valid_mask;
                     let nearest_intersection_valid_mask = nearest_intersection.valid_mask;
 
-                    let valid_both = nearest_intersection_valid_mask & intersection_valid_mask;
-                    let valid_either = nearest_intersection_valid_mask | intersection_valid_mask;
-                    let valid_exclusive = nearest_intersection_valid_mask ^ intersection_valid_mask;
+                    // Compute valid masks for each candidate.
+                    let valid_nearest = nearest_intersection_valid_mask;
+                    let valid_intersection = intersection.valid_mask;
+                    let valid_either = valid_nearest | valid_intersection;
 
-                    let valid_only_intersection = intersection_valid_mask & valid_exclusive;
-                    let valid_only_nearest_intersection = nearest_intersection_valid_mask & valid_exclusive;
+                    // Choose nearest when both are valid and nearest is better,
+                    // or when only nearest is valid.
+                    let choose_nearest = (valid_nearest & valid_intersection & nearest_intersection_has_lower_value)
+                        | (valid_nearest & !valid_intersection);
 
+                    // Blend t (and similarly estimated_distance_sq) in one shot.
+                    let new_t_candidate = choose_nearest.blend(nearest_intersection.t, intersection.t);
+                    let new_t = valid_either.blend(new_t_candidate, Rayx8::INVALID_VALUE_SPLATTED);
 
-                    let mut new_t = valid_both.blend(
-                        nearest_intersection_has_lower_value.blend(nearest_intersection.t, intersection.t),
-                        Rayx8::INVALID_VALUE_SPLATTED,
+                    let new_estimated_candidate = choose_nearest.blend(nearest_intersection.estimated_distance_sq, intersection.estimated_distance_sq);
+                    let new_estimated_dist = valid_either.blend(new_estimated_candidate, Rayx8::INVALID_VALUE_SPLATTED);
+
+                    let new_payload = SphereData::<Vec3x8, f32x8>::blend(
+                        nearest_intersection_has_lower_value,
+                        &nearest_intersection.payload,
+                        &intersection.payload,
                     );
-                    new_t = valid_only_intersection.blend(intersection.t, new_t);
-                    new_t = valid_only_nearest_intersection.blend(nearest_intersection.t, new_t);
-
-                    let mut new_estimated_dist = valid_both.blend(
-                        nearest_intersection_has_lower_value.blend(nearest_intersection.estimated_distance_sq, intersection.estimated_distance_sq),
-                        Rayx8::INVALID_VALUE_SPLATTED,
-                    );
-                    new_estimated_dist = valid_only_intersection.blend(intersection.estimated_distance_sq, new_estimated_dist);
-                    new_estimated_dist = valid_only_nearest_intersection.blend(nearest_intersection.estimated_distance_sq, new_estimated_dist);
-
-
-                    let new_payload = SphereData::<Vec3x8, f32x8>::blend(nearest_intersection_has_lower_value, &nearest_intersection.payload, &intersection.payload);
-
-                    //                     if (i_has_more_than_one_intersection || ni_has_more_than_one_intersection) && (intersection_valid_mask.move_mask() != nearest_intersection_valid_mask.move_mask()) {
-                    //                         println!("------\n\
-                    // i_valid: {intersection_valid_mask:?} \t / \t {nearest_intersection_valid_mask:?}\n\
-                    // both: {valid_both:?}\n\
-                    // eiter: {valid_either:?}\n\
-                    // exclusive: {valid_exclusive:?}\n\
-                    // only_i: {valid_only_intersection:?}\n\
-                    // only_ni: {valid_only_nearest_intersection:?}\n\
-                    // lower_val_i: {intersection_has_lower_value:?}\n
-                    // new_t: {new_t:?}\n\
-                    // new_payload: {new_payload:?}\n\
-                    // ------
-                    // ");
-                    //                     }
-                    //println!("{nearest_intersection:?} + {intersection:?}: {new_t:?} / {new_payload:?} / {valid_either:?}");
 
                     Some(RayIntersectionCandidate::new(new_t, new_estimated_dist, Cow::Owned(new_payload), valid_either))
                 });
