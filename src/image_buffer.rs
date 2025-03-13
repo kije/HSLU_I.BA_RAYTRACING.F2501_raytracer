@@ -14,7 +14,7 @@ where
 {
     pub fn new() -> Self {
         ImageBuffer {
-            buffer: [const { AtomicU32::new(0x101010) }; W * H],
+            buffer: [const { AtomicU32::new(0) }; W * H],
         }
     }
 

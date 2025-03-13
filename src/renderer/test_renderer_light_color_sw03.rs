@@ -7,14 +7,17 @@ use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::{Itertools, izip};
 use wide::CmpLt;
 
-use palette::Darken;
+use palette::blend::Blend;
+use palette::{Darken, Lighten, Mix, Srgb};
 use std::borrow::Cow;
 use std::intrinsics::{cold_path, likely, unlikely};
 use std::marker::PhantomData;
-use std::ops::BitAnd;
+use std::ops::{BitAnd, Mul};
 use std::sync::LazyLock;
 use ultraviolet::{Vec3, Vec3x4, Vec3x8, f32x4, f32x8, m32x4, m32x8};
 use wide::CmpGe;
+
+// Todo optimization-idea: ensure that ray direction & normals (on intersection) are unit vectors in constructors. This way we can simplify the maths in certain cases
 
 #[derive(Clone, Debug, Copy)]
 struct RayIntersectionCandidate<Scalar, Payload, ValidMask = ()>
@@ -59,6 +62,7 @@ where
     ValidMask: Copy,
 {
     intersection: Vector,
+    intersection_direction: Vector,
     normal: Vector,
     distance: Scalar,
     incident_angle_cos: Scalar,
@@ -73,6 +77,7 @@ where
 {
     pub const fn new(
         intersection: Vector,
+        intersection_direction: Vector,
         normal: Vector,
         distance: Scalar,
         incident_angle_cos: Scalar,
@@ -80,6 +85,7 @@ where
     ) -> Self {
         Self {
             intersection,
+            intersection_direction,
             normal,
             distance,
             incident_angle_cos,
@@ -88,10 +94,66 @@ where
     }
 }
 
+impl RayIntersection<Vec3, f32, ()> {
+    pub fn to_reflected_ray(&self) -> Ray {
+        //let sin = (1.0 - self.incident_angle_cos).sqrt();
+
+        Ray::new(
+            self.intersection.clone(),
+            self.intersection_direction.reflected(self.normal),
+        )
+    }
+}
+
+impl RayIntersection<Vec3x4, f32x4, m32x4> {
+    pub fn to_reflected_ray(&self) -> Rayx4 {
+        //let sin = (1.0 - self.incident_angle_cos).sqrt();
+
+        Rayx4::new(
+            self.intersection.clone(),
+            self.intersection_direction.reflected(self.normal),
+        )
+    }
+}
+
+impl RayIntersection<Vec3x8, f32x8, m32x8> {
+    pub fn to_reflected_ray(&self) -> Rayx8 {
+        //let sin = (1.0 - self.incident_angle_cos).sqrt();
+
+        Rayx8::new(
+            self.intersection.clone(),
+            self.intersection_direction.reflected(self.normal),
+        )
+    }
+}
+
+#[cfg(test)]
+mod test_ray_intersection_struct {
+    use super::*;
+
+    #[test]
+    fn test_ray_reflection_at_intersection() {
+        let deg: f32 = 90.0;
+        let intersection = RayIntersection::new(
+            Vec3::new(1.0, 1.0, 0.),
+            Vec3::new(1.0, 1., 0.),
+            Vec3::new(0.0, 1., 0.),
+            Vec3::new(1.0, 1.0, 0.).mag(),
+            deg.cos(),
+            (),
+        );
+
+        let reflection = intersection.to_reflected_ray();
+
+        println!("reflection: {:?}", reflection);
+    }
+}
+
 #[derive(Clone, Debug, Copy)]
 struct Ray {
     origin: Vec3,
     direction: Vec3,
+    #[deprecated(note = "Is always 1, as direction is normalized")]
     direction_mag_squared: f32,
 }
 
@@ -110,7 +172,6 @@ impl Ray {
     pub fn at(&self, t: f32) -> Vec3 {
         self.origin + t * self.direction
     }
-
     //pub fn reflect_at_intersection(&mut self, intersection: &RayIntersection<Vec3, f32, ()>) {}
 }
 
@@ -118,6 +179,7 @@ impl Ray {
 struct Rayx4 {
     origin: Vec3x4,
     direction: Vec3x4,
+    #[deprecated(note = "Is always 1, as direction is normalized")]
     direction_mag_squared: f32x4,
     valid_mask: Option<m32x4>,
 }
@@ -174,6 +236,7 @@ impl Rayx4 {
 struct Rayx8 {
     origin: Vec3x8,
     direction: Vec3x8,
+    #[deprecated(note = "Is always 1, as direction is normalized")]
     direction_mag_squared: f32x8,
     valid_mask: Option<m32x8>,
 }
@@ -313,12 +376,12 @@ macro_rules! intersect_sphere_simd_impl {
                 // You can factor out common terms (like the constant 4) and simplify the square root and division. This may let you avoid some multiplications and divisions in the inner loop.
                 // this then further down leads to the optimization that we can calculate the inverse of a (maybe use the fast inverse from minmath crate) and convert the division by a futher down t a multiplication by inv_a -> multiplication is generally faster than division
                 //let a = 2.0 * ray.direction_mag_squared; // u dot u
-                let a = 2.0 * ray.direction_mag_squared; // u dot u
-                let a_inv = a.recip(); // crate::helpers::fast_inverse(a);
+                static a: f32 = 2.0; // 2 * (u dot u) => 2 * direction_mag_squared => 2 * 1 => 2
+                static a_inv: f32 = a.recip(); // crate::helpers::fast_inverse(a);
                 let b = 2.0 * u.dot(v);
                 let c = v.dot(v) - self.r_sq;
 
-                let discriminant = b * b - (a * (2.0 * c));
+                let discriminant = b * b - ((2.0 * a) * c);
 
                 let discriminant_pos = discriminant.cmp_ge(F32Type::ZERO);
                 let discriminant_sqrt = discriminant.sqrt();
@@ -350,7 +413,7 @@ macro_rules! intersect_sphere_simd_impl {
                 // final_t_valid is lanes where we picked something
                 let final_t_valid = use_t0 | use_t1;
 
-                let estimated_distance = final_t * final_t * ray.direction_mag_squared;
+                let estimated_distance = final_t * final_t;
 
                 RayIntersectionCandidate::new(final_t, estimated_distance, payload, final_t_valid)
             }
@@ -375,10 +438,18 @@ macro_rules! intersect_sphere_simd_impl {
                 let r = p - VecType::from(self.c);
                 let n = r.normalized();
 
-                // we can remove   n.mag() probably, as it is 1 anyways
-                let incident_angle = p.dot(n) / (p.mag() * n.mag());
+                let p_mag = p.mag();
 
-                RayIntersection::new(p, n, (p - ray.origin).mag(), incident_angle, valid_mask)
+                let incident_angle = p.dot(n) / (p_mag);
+
+                RayIntersection::new(
+                    p,
+                    ray.direction.clone(),
+                    n,
+                    (p - ray.origin).mag(),
+                    incident_angle,
+                    valid_mask,
+                )
             }
         }
 
@@ -432,8 +503,8 @@ impl Intersectable for SphereData<Vec3, f32> {
         let u = ray.direction;
         let v = ray.origin - self.c;
 
-        let a = 2.0 * ray.direction_mag_squared;
-        let a_inv = a.recip();
+        static a: f32 = 2.0;
+        static a_inv: f32 = a.recip();
         let b = 2.0 * u.dot(v);
         let c = v.dot(v) - self.r_sq;
 
@@ -480,6 +551,7 @@ impl Intersectable for SphereData<Vec3, f32> {
 
         Some(RayIntersection::new(
             p,
+            ray.direction.clone(),
             n,
             (p - ray.origin).mag(),
             incident_angle,
@@ -488,7 +560,184 @@ impl Intersectable for SphereData<Vec3, f32> {
     }
 }
 
-static SPHERES: LazyLock<[SphereData<Vec3, f32>; 16]> = LazyLock::new(|| {
+#[derive(Debug, Copy, Clone)]
+struct PointData<Vector>
+where
+    Vector: Sized,
+{
+    p: Vector,
+}
+
+impl<Vector> PointData<Vector>
+where
+    Vector: Sized,
+{
+    const fn new(p: Vector) -> Self {
+        Self { p }
+    }
+}
+
+macro_rules! intersect_point_simd_impl {
+    ($x: ident) => {
+        impl Intersectable for PointData<concat_idents!(Vec3, $x)> {
+            type RayType = concat_idents!(Ray, $x);
+            type MaskType = concat_idents!(m32, $x);
+            type ScalarType = concat_idents!(f32, $x);
+            type VectorType = concat_idents!(Vec3, $x);
+
+            type ReturnTypeWrapper<T> = T;
+
+            fn check_intersection<'a, P>(
+                &'a self,
+                ray: &'_ Self::RayType,
+                payload: P,
+            ) -> Self::ReturnTypeWrapper<
+                RayIntersectionCandidate<Self::ScalarType, P, Self::MaskType>,
+            > {
+                type VecType = concat_idents!(Vec3, $x);
+                type F32Type = concat_idents!(f32, $x);
+                type RayType = concat_idents!(Ray, $x);
+
+                let ray: &concat_idents!(Ray, $x) = ray;
+
+                let p = VecType::from(self.p);
+                let v = p - ray.origin;
+                let t = v.dot(ray.direction);
+
+                let intersection_valid = (ray.at(t) - p).mag_sq().cmp_ge(F32Type::splat(0.01));
+
+                let estimated_distance = t * t;
+
+                RayIntersectionCandidate::new(t, estimated_distance, payload, intersection_valid)
+            }
+
+            fn intersect<'a>(
+                &'a self,
+                ray: &'_ Self::RayType,
+                candidate: &'_ RayIntersectionCandidate<Self::ScalarType, &'a Self, Self::MaskType>,
+            ) -> Self::ReturnTypeWrapper<
+                RayIntersection<Self::VectorType, Self::ScalarType, Self::MaskType>,
+            > {
+                type VecType = concat_idents!(Vec3, $x);
+                type F32Type = concat_idents!(f32, $x);
+                type RayType = concat_idents!(Ray, $x);
+
+                let ray: &concat_idents!(Ray, $x) = ray;
+
+                let t = candidate.t;
+                let valid_mask = candidate.valid_mask;
+
+                let p = ray.at(t);
+                let n = ray.at(t * -1.0).normalized();
+
+                RayIntersection::new(
+                    p,
+                    ray.direction.clone(),
+                    n,
+                    (p - ray.origin).mag(),
+                    F32Type::splat(1.0),
+                    valid_mask,
+                )
+            }
+        }
+
+        impl PointData<concat_idents!(Vec3, $x)> {
+            fn blend(mask: concat_idents!(m32, $x), t: &Self, f: &Self) -> Self {
+                Self {
+                    p: <concat_idents!(Vec3, $x)>::blend(mask, t.p, f.p),
+                }
+            }
+
+            fn splat(v: &PointData<Vec3>) -> Self {
+                Self {
+                    p: <concat_idents!(Vec3, $x)>::splat(v.p),
+                }
+            }
+        }
+    };
+}
+
+intersect_point_simd_impl!(x4);
+intersect_point_simd_impl!(x8);
+
+impl Intersectable for PointData<Vec3> {
+    type RayType = Ray;
+    type ScalarType = f32;
+    type VectorType = Vec3;
+    type MaskType = ();
+    type ReturnTypeWrapper<T> = Option<T>;
+
+    fn check_intersection<'a, P>(
+        &'a self,
+        ray: &'_ Self::RayType,
+        payload: P,
+    ) -> Self::ReturnTypeWrapper<RayIntersectionCandidate<Self::ScalarType, P, Self::MaskType>>
+    {
+        let v = self.p - ray.origin;
+
+        let t = v.dot(ray.direction);
+        let p_t = ray.at(t);
+
+        if (p_t - self.p).mag_sq() > 0.01 {
+            return None;
+        }
+
+        Some(RayIntersectionCandidate::new(t, v.mag_sq(), payload, ()))
+    }
+
+    fn intersect<'a>(
+        &'a self,
+        ray: &'_ Self::RayType,
+        candidate: &'_ RayIntersectionCandidate<Self::ScalarType, &'a Self, Self::MaskType>,
+    ) -> Self::ReturnTypeWrapper<RayIntersection<Self::VectorType, Self::ScalarType, Self::MaskType>>
+    {
+        let t = candidate.t;
+
+        let p = ray.at(t);
+        let n = ray.at(t * -1.0).normalized();
+
+        Some(RayIntersection::new(
+            p,
+            ray.direction.clone(),
+            n,
+            (p - ray.origin).mag(),
+            1.0,
+            (),
+        ))
+    }
+}
+
+#[cfg(test)]
+mod test_point_intersection {
+    use super::*;
+
+    #[test]
+    fn test_check_intersection_point() {
+        let v = Vec3::new(1.0, 0.0, 0.0);
+        let point = PointData::new(2.0 * v);
+
+        let ray = Ray::new(Vec3::zero(), v);
+
+        let i = point.check_intersection(&ray, ());
+
+        assert!(i.is_some());
+        assert_eq!(i.unwrap().estimated_distance_sq, (2.0 * v).mag_sq());
+    }
+
+    #[test]
+    fn test_check_intersection_point_not() {
+        let v = Vec3::new(1.0, 0.0, 0.0);
+        let point = PointData::new(2.0 * Vec3::new(0.0, 1.0, 0.0));
+
+        let ray = Ray::new(Vec3::zero(), v);
+
+        let i = point.check_intersection(&ray, ());
+
+        assert!(i.is_none());
+    }
+}
+
+static SPHERES: LazyLock<[SphereData<Vec3, f32>; 8]> = LazyLock::new(|| {
     [
         SphereData::new(
             Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
@@ -554,75 +803,10 @@ static SPHERES: LazyLock<[SphereData<Vec3, f32>; 16]> = LazyLock::new(|| {
             25.0,
             ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
         ),
-        // dupl
-        SphereData::new(
-            Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
-            90.0,
-            ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                2.0 * (WINDOW_WIDTH as f32 / 2.5),
-                WINDOW_HEIGHT as f32 / 2.5,
-                150.0,
-            ),
-            90.0,
-            ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                2.0 * (WINDOW_WIDTH as f32 / 2.5),
-                2.0 * (WINDOW_HEIGHT as f32 / 2.5),
-                250.0,
-            ),
-            120.0,
-            ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                1.25 * (WINDOW_WIDTH as f32 / 2.5),
-                0.5 * (WINDOW_HEIGHT as f32 / 2.5),
-                90.0,
-            ),
-            30.0,
-            ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                (WINDOW_WIDTH as f32 / 2.5),
-                2.25 * (WINDOW_HEIGHT as f32 / 2.5),
-                500.0,
-            ),
-            250.0,
-            ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                WINDOW_WIDTH as f32 / 4.0,
-                3.0 * (WINDOW_HEIGHT as f32 / 4.0),
-                20.0,
-            ),
-            10.0,
-            ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                WINDOW_WIDTH as f32 / 3.0,
-                3.0 * (WINDOW_HEIGHT as f32 / 6.0),
-                30.0,
-            ),
-            25.0,
-            ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
-            70.0,
-            ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
-        ),
     ]
 });
 
-const N_RANDOM_SPHERES: usize = 1_000;
+const N_RANDOM_SPHERES: usize = 10_000;
 static SPHERES_RANDOM: LazyLock<[SphereData<Vec3, f32>; N_RANDOM_SPHERES]> = LazyLock::new(|| {
     (0..N_RANDOM_SPHERES)
         .map(|i| {
@@ -658,6 +842,41 @@ static SPHERES_RANDOM: LazyLock<[SphereData<Vec3, f32>; N_RANDOM_SPHERES]> = Laz
 
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
+static LIGHT_1: LazyLock<SphereData<Vec3, f32>> = LazyLock::new(|| {
+    SphereData::new(
+        Vec3::new(-100.0, 1000.0, -10.0),
+        100.0,
+        ColorType::new(0.822, 0.675, 0.45),
+    )
+});
+
+static LIGHT_2: LazyLock<SphereData<Vec3, f32>> = LazyLock::new(|| {
+    SphereData::new(
+        Vec3::new(1.0, -1.0, 100.0),
+        100.0,
+        ColorType::new(0.0, 0.675, 0.9),
+    )
+});
+
+static LIGHT_3: LazyLock<SphereData<Vec3, f32>> = LazyLock::new(|| {
+    SphereData::new(
+        Vec3::new(0.0, 0.0, -100000.0),
+        100.0,
+        ColorType::new(0., 0., 0.),
+    )
+});
+
+static LIGHT_4: LazyLock<SphereData<Vec3, f32>> = LazyLock::new(|| {
+    SphereData::new(
+        Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 2) as f32, 120.0),
+        100.0,
+        ColorType::new(0.7, 0.6, 0.5),
+    )
+});
+
+static LIGHTS: [&LazyLock<SphereData<Vec3, f32>, fn() -> SphereData<Vec3, f32>>; 4] =
+    [&LIGHT_1, &LIGHT_2, &LIGHT_3, &LIGHT_4];
+
 #[derive(Debug, Copy, Clone, Default)]
 pub(crate) struct TestRenderer3DLightColorSW03<C: OutputColorEncoder>(PhantomData<C>);
 
@@ -665,36 +884,71 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
         let ray = Ray::new(Vec3::new(x as f32, y as f32, 0.0), RENDER_RAY_DIRECTION);
 
-        let nearest_intersection =
-            SPHERES_RANDOM
-                .iter()
-                .fold(None, |nearest_intersection, sphere| {
-                    let intersection = sphere.check_intersection(&ray, sphere);
+        let nearest_intersection = SPHERES.iter().fold(None, |nearest_intersection, sphere| {
+            let intersection = sphere.check_intersection(&ray, sphere);
 
-                    match (nearest_intersection, intersection) {
-                        (None, intersection) => intersection,
-                        (nearest_intersection, None) => nearest_intersection,
-                        (Some(nearest_intersection), Some(intersection))
-                            if intersection.t > nearest_intersection.t =>
-                        {
-                            Some(nearest_intersection)
-                        }
-                        (Some(_), intersection) => intersection,
-                    }
-                })?;
+            match (nearest_intersection, intersection) {
+                (None, intersection) => intersection,
+                (nearest_intersection, None) => nearest_intersection,
+                (Some(nearest_intersection), Some(intersection))
+                    if intersection.t > nearest_intersection.t =>
+                {
+                    Some(nearest_intersection)
+                }
+                (Some(_), intersection) => intersection,
+            }
+        })?;
 
         let intersection_object = nearest_intersection.payload;
 
-        let RayIntersection {
+        let intersection @ RayIntersection {
             distance,
             incident_angle_cos,
+            intersection: intersection_point,
+            normal: intersection_normal,
             ..
         } = intersection_object.intersect(&ray, &nearest_intersection)?;
 
         // println!("cos(theta) = {}", incident_angle_cos);
         let d = distance / intersection_object.c.mag();
 
-        Some(Pixel(intersection_object.color.darken_fixed(2.0 * d)))
+        let ambient_lighting_amount = 0.05;
+        let mut direct_lighting_amount = 0.0;
+        let mut light_color = ColorType::new(0., 0., 0.);
+
+        for light in LIGHTS.iter() {
+            let light_to_intersection = light.c - intersection_point;
+            let light_distance = light_to_intersection.mag();
+
+            let incident_light_angle_cos =
+                light_to_intersection.dot(intersection_normal) / light_distance;
+
+            if incident_light_angle_cos >= 0.0 {
+                light_color = light_color.mix(
+                    light.color,
+                    incident_light_angle_cos.abs() + 1.0 / (light_distance),
+                );
+                direct_lighting_amount = (direct_lighting_amount
+                    + (incident_light_angle_cos.abs() + 1.0 / (light_distance)))
+                    .min(1.0);
+            }
+        }
+
+        // raytrace light back to surce
+        // let reflected_ray = intersection.to_reflected_ray();
+        // if let Some(_) = LIGHT.check_intersection(&reflected_ray, ()) {
+        //     direct_lighting_amount = incident_angle_cos.abs();
+        //     light_color = LIGHT.color.clone();
+        // }
+
+        let ambient_color = intersection_object
+            .color
+            .darken_fixed(1.0 - ambient_lighting_amount * (0.25 / d).min(1.1));
+
+        Some(Pixel(ambient_color.mix(
+            ambient_color.soft_light(light_color),
+            direct_lighting_amount,
+        )))
     }
 
     fn render_pixel_colors<'a>(
@@ -722,7 +976,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                         VecType::unit_z(),
                     );
 
-                    let nearest_intersection = SPHERES_RANDOM.iter().fold(None, |previous_intersection: Option<_>, sphere| {
+                    let nearest_intersection = SPHERES.iter().fold(None, |previous_intersection: Option<_>, sphere| {
                         let sphere = SphereData::<VecType, F32Type>::splat(sphere);
                         let new_intersection: RayIntersectionCandidate<F32Type, _, MaskType> = sphere.check_intersection(&ray, Cow::Owned(sphere));
 
@@ -807,13 +1061,86 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                     let RayIntersection {
                         distance,
                         incident_angle_cos,
+                        intersection: intersection_point,
                         valid_mask,
+                        normal: intersection_normal,
                         ..
                     } = intersected_object.intersect(&ray, &RayIntersectionCandidate::new(nearest_intersection.t, nearest_intersection.estimated_distance_sq, intersected_object.as_ref(), nearest_intersection.valid_mask));
 
 
+
+
+
+                    //////////////////////
+
+
                     let d = distance / intersected_object.c.mag();
-                    let colors = intersected_object.color.darken_fixed(2.0 * d);
+
+                    let ambient_lighting_amount = F32Type::splat(0.05);
+                    let mut direct_lighting_amount = F32Type::ZERO;
+                    let mut light_color = Srgb::<F32Type>::new(F32Type::ZERO, F32Type::ZERO, F32Type::ZERO);
+
+                    for light in LIGHTS.iter() {
+                        let light = SphereData::<VecType, F32Type>::splat(light);
+                        let light_to_intersection = light.c - intersection_point;
+                        let light_distance = light_to_intersection.mag();
+
+                        let incident_light_angle_cos =
+                            light_to_intersection.dot(intersection_normal) / light_distance;
+
+                        let incident_angle_pos = incident_light_angle_cos.cmp_ge(F32Type::ZERO);
+
+                        let mixed_color = light_color.mix(
+                                light.color,
+                                incident_light_angle_cos.abs() + F32Type::ONE / (light_distance),
+                            );
+
+                        // tod extract that to a trait or something
+                        light_color = Srgb::<F32Type>::new(
+                            incident_angle_pos.blend(
+                                mixed_color.red,
+                                light_color.red,
+                            ),
+                            incident_angle_pos.blend(
+                                mixed_color.green,
+                                light_color.green,
+                            ),
+                           incident_angle_pos.blend(
+                                mixed_color.blue,
+                                light_color.blue,
+                            ),
+                        );
+
+
+                        direct_lighting_amount = incident_angle_pos.blend(
+                            (direct_lighting_amount
+                            + (incident_light_angle_cos.abs() + F32Type::ONE / (light_distance)))
+                            .min(F32Type::ONE),
+                            direct_lighting_amount
+                        );
+                    }
+
+                    // raytrace light back to surce
+                    // let reflected_ray = intersection.to_reflected_ray();
+                    // if let Some(_) = LIGHT.check_intersection(&reflected_ray, ()) {
+                    //     direct_lighting_amount = incident_angle_cos.abs();
+                    //     light_color = LIGHT.color.clone();
+                    // }
+
+                    let ambient_color = intersected_object.color
+                        .darken_fixed(F32Type::splat(1.0) - ambient_lighting_amount * (F32Type::splat(0.25) / d).min(F32Type::splat(1.1)));
+
+                    let colors =ambient_color.mix(
+                        ambient_color.soft_light(light_color),
+                        direct_lighting_amount,
+                    );
+
+                    //////////////////////
+
+
+
+
+
 
                     let x = colors.extract_values(Some(valid_mask));
 
