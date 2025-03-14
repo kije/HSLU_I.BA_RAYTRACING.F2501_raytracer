@@ -12,13 +12,19 @@ impl<const W: usize, const H: usize> ImageBuffer<W, H>
 where
     [(); W * H]:,
 {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         ImageBuffer {
             buffer: [const { AtomicU32::new(0) }; W * H],
         }
     }
 
-    pub(crate) fn get_u32_slice(&self) -> &[u32] {
+    pub const fn new_with_color<const COLOR: u32>() -> Self {
+        ImageBuffer {
+            buffer: [const { AtomicU32::new(COLOR) }; W * H],
+        }
+    }
+
+    pub(crate) const fn get_u32_slice(&self) -> &[u32] {
         unsafe {
             // Convert the pointer of the atomic array to a pointer of u32.
             std::slice::from_raw_parts(self.buffer.as_ptr() as *const u32, self.buffer.len())

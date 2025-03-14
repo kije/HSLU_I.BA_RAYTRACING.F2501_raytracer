@@ -806,30 +806,30 @@ static SPHERES: LazyLock<[SphereData<Vec3, f32>; 8]> = LazyLock::new(|| {
     ]
 });
 
-const N_RANDOM_SPHERES: usize = 10_000;
+const N_RANDOM_SPHERES: usize = 2_000;
 static SPHERES_RANDOM: LazyLock<[SphereData<Vec3, f32>; N_RANDOM_SPHERES]> = LazyLock::new(|| {
     (0..N_RANDOM_SPHERES)
         .map(|i| {
             let rnd =
-                f32::from(((i % 255) + ((i / 23) % 255) + ((i / 4) % 255)) as u16) / (255.0 * 3.0);
+                f32::from(((i % 255) + ((i / 45) % 255) + ((i / 4) % 255)) as u16) / (255.0 * 3.0);
             let rnd2 = f32::from(
                 (((i / 5) % 255) + ((i / 17) % 255) + ((i / 2) % 255) + (((i + 1) / 9) % 255))
                     as u16,
-            ) / (255.0 * 4.0);
+            ) / (255.0 * 3.0);
 
             let pol = if rnd < rnd2 { -1.0 } else { 1.0 };
 
-            let r = rnd * 75.0;
+            let r = rnd * 65.0;
             SphereData::new(
                 Vec3::new(
-                    (((i * 50) % WINDOW_WIDTH) as f32).max(r),
+                    (((i * 40) % WINDOW_WIDTH) as f32).max(r),
                     (((((WINDOW_HEIGHT / ((i % 45) + 1)) + 100) % WINDOW_HEIGHT) as f32) * 2.5)
                         % WINDOW_HEIGHT as f32,
-                    (25.2 + (pol * rnd * (WINDOW_HEIGHT as f32 / 1.66))).max(r),
+                    (85.2 + (pol * rnd * (WINDOW_HEIGHT as f32 / 1.66))).max(r),
                 ),
                 r,
                 ColorType::new(
-                    ((i / 8) % 255) as u8,
+                    ((i / 12) % 255) as u8,
                     ((i / 3) % 255) as u8,
                     ((i * 8) % 255) as u8,
                 )
@@ -912,7 +912,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
         // println!("cos(theta) = {}", incident_angle_cos);
         let d = distance / intersection_object.c.mag();
 
-        let ambient_lighting_amount = 0.05;
+        let ambient_lighting_amount = 0.06;
         let mut direct_lighting_amount = 0.0;
         let mut light_color = ColorType::new(0., 0., 0.);
 
@@ -930,7 +930,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                 );
                 direct_lighting_amount = (direct_lighting_amount
                     + (incident_light_angle_cos.abs() + 1.0 / (light_distance)))
-                    .min(1.0);
+                    .min(0.89);
             }
         }
 
@@ -1076,7 +1076,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
 
                     let d = distance / intersected_object.c.mag();
 
-                    let ambient_lighting_amount = F32Type::splat(0.05);
+                    let ambient_lighting_amount = F32Type::splat(0.06);
                     let mut direct_lighting_amount = F32Type::ZERO;
                     let mut light_color = Srgb::<F32Type>::new(F32Type::ZERO, F32Type::ZERO, F32Type::ZERO);
 
@@ -1115,7 +1115,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                         direct_lighting_amount = incident_angle_pos.blend(
                             (direct_lighting_amount
                             + (incident_light_angle_cos.abs() + F32Type::ONE / (light_distance)))
-                            .min(F32Type::ONE),
+                            .min(F32Type::splat(0.89)),
                             direct_lighting_amount
                         );
                     }

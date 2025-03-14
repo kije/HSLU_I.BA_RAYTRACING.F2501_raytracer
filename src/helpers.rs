@@ -7,8 +7,12 @@ pub(crate) type ColorType<T = f32> = Srgb<T>;
 pub(crate) struct Pixel(pub ColorType);
 
 impl Pixel {
-    pub fn new(r: u8, g: u8, b: u8) -> Self {
-        Self(ColorType::new(r, g, b).into_format())
+    pub const fn new(r: u8, g: u8, b: u8) -> Self {
+        Self(ColorType::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+        ))
     }
 }
 
