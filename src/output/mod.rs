@@ -1,5 +1,4 @@
 use crate::image_buffer::ImageBuffer;
-use std::time::Duration;
 
 mod window;
 use crate::helpers::{Pixel, RenderTiming};

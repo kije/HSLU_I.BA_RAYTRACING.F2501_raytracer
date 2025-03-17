@@ -2,7 +2,6 @@ use crate::helpers::{Pixel, RenderTiming};
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputColorEncoder, OutputInteractive};
 use minifb::{Key, Result as WindowResult, Scale, ScaleMode, Window, WindowOptions};
-use palette::{Srgb, rgb};
 
 #[derive(Debug)]
 pub(crate) struct WindowOutputInner<const W: usize, const H: usize> {
