@@ -3,7 +3,9 @@ use std::ops::Deref;
 use std::time::{Duration, Instant};
 
 pub(crate) type ColorType<T = f32> = Srgb<T>;
+
 #[derive(Debug, Copy, Clone, PartialEq)]
+#[repr(transparent)]
 pub(crate) struct Pixel(pub ColorType);
 
 impl Pixel {

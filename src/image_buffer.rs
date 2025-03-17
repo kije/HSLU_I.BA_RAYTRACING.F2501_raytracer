@@ -1,6 +1,7 @@
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
 
+#[repr(transparent)]
 pub(crate) struct ImageBuffer<const W: usize, const H: usize>
 where
     [(); W * H]:,

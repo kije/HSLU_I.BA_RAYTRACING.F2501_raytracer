@@ -4,12 +4,14 @@
 #![allow(incomplete_features)]
 
 mod extensions;
-mod geometry;
+// mod geometry;
 mod helpers;
 mod image_buffer;
-mod math;
+// mod math;
 mod output;
 mod renderer;
+mod scalar;
+mod vector;
 
 use crate::helpers::RenderTiming;
 use crate::image_buffer::ImageBuffer;
