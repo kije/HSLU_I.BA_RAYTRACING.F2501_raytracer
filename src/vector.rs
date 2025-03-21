@@ -1,5 +1,4 @@
 use crate::scalar::Scalar;
-use num_traits::Zero;
 use simba::simd::{SimdValue, WideF32x4, WideF32x8};
 use std::fmt::Debug;
 use ultraviolet::{
@@ -108,6 +107,7 @@ unsafe fn cast_simd_value<Wrapper, Inner>(value: &Wrapper) -> &Inner {
 #[cfg(test)]
 mod test_cast_simd_value {
     use super::*;
+    use num_traits::Zero;
 
     #[test]
     fn test_cast_simd_value() {
@@ -325,12 +325,7 @@ macro_rules! impl_vector {
             fn one() -> Self {
                 Self::one()
             }
-
         }
-
-
-
-
 
         $(
             impl crate::vector::VectorAssociations for $vec {

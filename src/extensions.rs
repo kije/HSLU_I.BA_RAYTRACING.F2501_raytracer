@@ -1,7 +1,7 @@
 use itertools::{Itertools, izip};
 use palette::Srgb;
-use palette::num::One;
-use palette::rgb::Rgb;
+use palette::num::{IsValidDivisor, One};
+use simba::simd::{SimdValue, WideBoolF32x4, WideBoolF32x8, WideF32x4, WideF32x8, WideF64x4};
 use ultraviolet::{m32x4, m32x8};
 use wide::{f32x4, f32x8};
 
@@ -44,8 +44,6 @@ macro_rules! impl_srgb_color_convert {
                 .unwrap()
             }
         }
-
-        use ::simba::simd::*;
 
         impl SrgbColorConvertExt for Srgb<concat_idents!(WideF32, $x)> {
             const NUM_OUTPUT_VALUES: usize = $n;

@@ -5,32 +5,29 @@ use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::{Itertools, izip};
-use wide::{CmpGt, CmpLt};
 
 use crate::scalar::Scalar;
 use crate::vector::{
     CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsReflectable,
-    CommonVecOperationsSimdOperations, Vector,
+    CommonVecOperationsSimdOperations,
 };
-use num_traits::real::Real;
-use num_traits::{Bounded, ConstZero, Float, NumOps, One, PrimInt, Zero};
+
+use num_traits::{Float, NumOps, One, Zero};
 use palette::blend::{Blend, Premultiply};
 use palette::bool_mask::{HasBoolMask, LazySelect};
 use palette::cast::ArrayCast;
 use palette::stimulus::StimulusColor;
-use palette::{Darken, Lighten, Mix, Srgb, Srgba};
+use palette::{Darken, Mix, Srgb};
 use simba::scalar::{SubsetOf, SupersetOf};
-use simba::simd::{
-    SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue, WideBoolF32x4,
-};
+use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue};
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::intrinsics::{cold_path, likely, unlikely};
+use std::intrinsics::{likely, unlikely};
 use std::marker::PhantomData;
-use std::ops::{Add, BitAnd, Mul, Neg, Sub};
+use std::ops::{Add, Mul, Neg, Sub};
 use std::sync::LazyLock;
-use ultraviolet::{Vec3, Vec3x4, Vec3x8, f32x4, f32x8, m32x4, m32x8};
-use wide::CmpGe;
+use ultraviolet::{Vec3, Vec3x8, f32x8};
+
 // Todo optimization-idea: ensure that ray direction & normals (on intersection) are unit vectors in constructors. This way we can simplify the maths in certain cases
 
 #[derive(Clone, Debug, Copy)]
@@ -320,17 +317,17 @@ where
         let u = ray.direction;
         let v = ray.origin - self.c;
 
-        // FIXME if  we garantuee ray direction is normalized, we can avoid multiplying by direction_mag_squared here, as it will be 1 anyways => a = 2.0
+        // FIXME if  we garantuee ray direction is normalized, we can avoid multiplying by direction_mag_squared here, as it will be 1 anyways => A = 2.0
         // CHATGPT:
         // Diskriminant Δ=(2(u⋅v))^2 − 4(v⋅v−r^2)
         // You can factor out common terms (like the constant 4) and simplify the square root and division. This may let you avoid some multiplications and divisions in the inner loop.
-        // this then further down leads to the optimization that we can calculate the inverse of a (maybe use the fast inverse from minmath crate) and convert the division by a futher down t a multiplication by inv_a -> multiplication is generally faster than division
-        //let a = 2.0 * ray.direction_mag_squared; // u dot u
-        static a: f32 = 2.0; // 2 * (u dot u) => 2 * direction_mag_squared => 2 * 1 => 2
-        static a_inv: f32 = a.recip(); // crate::helpers::fast_inverse(a);
-        let a_splat = Vector::Scalar::from_subset(&a);
+        // this then further down leads to the optimization that we can calculate the inverse of A (maybe use the fast inverse from minmath crate) and convert the division by A futher down t A multiplication by inv_a -> multiplication is generally faster than division
+        //let A = 2.0 * ray.direction_mag_squared; // u dot u
+        static A: f32 = 2.0; // 2 * (u dot u) => 2 * direction_mag_squared => 2 * 1 => 2
+        static A_INV: f32 = A.recip(); // crate::helpers::fast_inverse(A);
+        let a_splat = Vector::Scalar::from_subset(&A);
         let two_splat = Vector::Scalar::from_subset(&2.0);
-        let a_inv_splat = Vector::Scalar::from_subset(&a_inv);
+        let a_inv_splat = Vector::Scalar::from_subset(&A_INV);
 
         let b: Vector::Scalar = two_splat * u.dot(v);
         let c: Vector::Scalar = v.dot(v) - self.r_sq;
@@ -340,8 +337,8 @@ where
         let discriminant_pos = discriminant.simd_ge(Vector::Scalar::zero());
         let discriminant_sqrt = discriminant.simd_sqrt();
 
-        // FIXME optimize by replacing / a by * inv_a
-        //let t1 = (-b - discriminant_sqrt) / a;
+        // FIXME optimize by replacing / A by * inv_a
+        //let t1 = (-b - discriminant_sqrt) / A;
         let minus_b: Vector::Scalar = b.neg();
         let t0: Vector::Scalar = (minus_b - discriminant_sqrt) * a_inv_splat;
         let t1: Vector::Scalar = (minus_b + discriminant_sqrt) * a_inv_splat;
@@ -655,7 +652,7 @@ static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
         ),
         SphereData::new(
             Vec3::new(
-                (WINDOW_WIDTH as f32 / 2.5),
+                WINDOW_WIDTH as f32 / 2.5,
                 2.25 * (WINDOW_HEIGHT as f32 / 2.5),
                 500.0,
             ),
@@ -749,8 +746,6 @@ pub(crate) struct TestRenderer3DLightColorSW03<C: OutputColorEncoder>(PhantomDat
 
 impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
-        let ray = Ray::new(Vec3::new(x as f32, y as f32, 0.0), RENDER_RAY_DIRECTION);
-
         let (colors, valid) = Self::get_pixel_color_vectorized(
             Vec3::new(x as f32, y as f32, 0.0),
             RENDER_RAY_DIRECTION,
@@ -758,7 +753,7 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
             LIGHTS.iter(),
         )?;
 
-        if !valid {
+        if unlikely(!valid) {
             return None;
         }
 
@@ -885,7 +880,6 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
         let intersected_object = nearest_intersection.payload;
         let RayIntersection {
             distance,
-            incident_angle_cos,
             intersection: intersection_point,
             valid_mask,
             normal: intersection_normal,
@@ -1006,40 +1000,16 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
                     set_pixel(idxs[pixel_index], Pixel(c));
                 }
                 return;
-            }
-
-            // let x = colors.extract_values(Some(valid_mask));
-            //
-            // for (pixel_index, &c) in x.iter().enumerate().filter_map(|(i, v)| {
-            //     let Some(v) = v else {
-            //         return None;
-            //     };
-            //     Some((i, v))
-            // }) {
-            //     $set_pixel($idxs[pixel_index], Pixel(c));
-            // }
-
-            if likely(len == 8) {
-                //impl_render_pixel_colors_simd!(x8, xs, ys, zs, idxs, set_pixel);
-            } else if unlikely(len == 4) {
-                //impl_render_pixel_colors_simd!(x4, xs, ys, zs, idxs, set_pixel);
             } else {
-                izip!(xs.iter(), ys.iter(), idxs.iter())
-                    .map(|(x, y, i)| {
-                        (
-                            *i,
-                            RenderCoordinates {
-                                x: x.floor() as usize,
-                                y: y.floor() as usize,
-                            },
-                        )
-                    })
-                    .map(|(i, coords)| (i, Self::get_pixel_color(coords)))
-                    .for_each(|(i, color)| {
-                        if let Some(pixel_color) = color {
-                            set_pixel(i, pixel_color);
-                        }
-                    });
+                for (&x, (&y, &i)) in xs.iter().zip(ys.iter().zip(idxs.iter())) {
+                    let coords = RenderCoordinates {
+                        x: x.floor() as usize,
+                        y: y.floor() as usize,
+                    };
+                    if let Some(pixel) = Self::get_pixel_color(coords) {
+                        set_pixel(i, pixel);
+                    }
+                }
             }
         });
     }

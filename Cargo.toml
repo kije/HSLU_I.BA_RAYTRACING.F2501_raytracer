@@ -9,12 +9,12 @@ rayon = "1.10"
 mint = "0.5"
 ultraviolet = { version = "0.9", features = ["mint", "int", "f64", "num-traits"] }
 
-palette = { version = "0.7", features = ["wide"] }
+palette = { version = "0.7", git = "https://github.com/kije/palette.git", features = ["wide", "simba"] }
 
 
 wide = "0.7"
 simd_aligned = "0.6"
-simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "palette", "partial_fixed_point_support"] }
+simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support"] }
 num-traits = "0.2"
 paste = "1.0.15"
 itertools = "0.14"
@@ -30,3 +30,6 @@ simd_render = []
 simulate_slow_render = []
 render_timing_debug = ["incr_stats"]
 high_resolution = []
+
+[patch.crates-io]
+simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support"] }
