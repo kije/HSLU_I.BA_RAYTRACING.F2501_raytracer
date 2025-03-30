@@ -1,32 +1,33 @@
 use crate::helpers::Pixel;
 use crate::image_buffer::ImageBuffer;
 
-use mint::Point2;
 use rayon::prelude::*;
 use std::sync::atomic::Ordering;
 
-use std::time::Duration;
-use std::{mem, thread};
-
 #[cfg(feature = "render_timing_debug")]
 use incr_stats::vec::Stats;
+use itertools::{Itertools, multiunzip};
+use std::ops::{Range, RangeFull};
 #[cfg(feature = "render_timing_debug")]
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 #[cfg(feature = "render_timing_debug")]
 use std::time::Instant;
+use std::{mem, thread};
 
 mod test_renderer;
 mod test_renderer_3d_sphere_sw02;
 mod test_renderer_light_color_sw03;
+mod test_renderer_sw03_common_code;
 mod test_renderer_vector;
 
 use crate::output::OutputColorEncoder;
-pub(crate) use test_renderer::TestRenderer;
-pub(crate) use test_renderer_3d_sphere_sw02::TestRenderer3DSphereSW02;
-pub(crate) use test_renderer_light_color_sw03::TestRenderer3DLightColorSW03;
-pub(crate) use test_renderer_vector::TestRendererVector;
+pub(crate) use test_renderer_sw03_common_code::TestRenderer3DSW03CommonCode;
 
-pub(crate) type RenderCoordinates = Point2<usize>;
+pub(crate) struct RenderCoordinates {
+    x: usize,
+    y: usize,
+}
 
 pub(crate) struct RenderCoordinatesVectorized<'a> {
     i: &'a [usize],
@@ -78,7 +79,7 @@ pub(crate) fn print_render_stats(render_times: &[f64]) {
 
 pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
     const RENDER_STRIDE: usize = const {
-        (W / 32)
+        (W / 16)
             .next_multiple_of(64 / mem::size_of::<u32>())
             .next_multiple_of(8)
         // align to vectorized x8 size and cache lines to avoid false sharing
@@ -115,7 +116,7 @@ pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder>
                         let x = pixel_offset % W;
                         let y = pixel_offset / W;
 
-                        if let Some(pixel_color) = cb([x, y].into()) {
+                        if let Some(pixel_color) = cb(RenderCoordinates { x, y }) {
                             pixel.store(C::to_output(&pixel_color), Ordering::Relaxed);
                             if cfg!(feature = "simulate_slow_render") {
                                 thread::sleep(Duration::from_micros(70));
@@ -139,30 +140,31 @@ pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder>
     fn render_to_buffer_chunked_inplace<F>(buffer: &ImageBuffer<W, H>, cb: F)
     where
         [(); W * H]:,
-        F: Fn(RenderCoordinatesVectorized, &dyn Fn(usize, Pixel)) + Sync,
+        F: Fn(
+                RenderCoordinatesVectorized,
+                &dyn Fn(usize, Pixel), // todo: callback shall also support depth ob intersected object at that point, enabling us to generate a depth map
+            ) + Sync,
     {
-        let chunk_size = Self::RENDER_STRIDE;
-
         #[cfg(feature = "render_timing_debug")]
         let render_times = Arc::new(Mutex::new(Vec::with_capacity(
-            buffer.len() / (chunk_size - 1),
+            buffer.len() / (Self::RENDER_STRIDE - 1),
         )));
         {
             #[cfg(feature = "render_timing_debug")]
             let render_times = render_times.clone();
 
             buffer
-                .par_chunks(chunk_size)
+                .par_chunks(Self::RENDER_STRIDE)
                 .enumerate()
                 .for_each(|(chunk_index, p)| {
                     #[cfg(feature = "render_timing_debug")]
                     let start = Instant::now();
 
-                    let chunk_offset = chunk_index * chunk_size;
+                    let chunk_offset = chunk_index * Self::RENDER_STRIDE;
 
                     let indexes = (0..p.len()).map(|j| (j, chunk_offset + j));
 
-                    let (i, x, y): (Vec<usize>, Vec<f32>, Vec<f32>) = indexes
+                    let (i, x, y): (Vec<_>, Vec<_>, Vec<_>) = indexes
                         .map(|(j, pixel_offset)| {
                             (j, (pixel_offset % W) as f32, (pixel_offset / W) as f32)
                         })
@@ -170,15 +172,16 @@ pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder>
 
                     let z = vec![0.0f32; p.len()];
 
-                    let c = RenderCoordinatesVectorized {
+                    let coordinates = RenderCoordinatesVectorized {
                         i: &i,
                         x: &x,
                         y: &y,
                         z: &z,
                     };
 
-                    cb(c, &|i, pixel| {
+                    cb(coordinates, &|i, pixel| {
                         p[i].store(C::to_output(&pixel), Ordering::Relaxed);
+
                         if cfg!(feature = "simulate_slow_render") {
                             thread::sleep(Duration::from_micros(70));
                         }

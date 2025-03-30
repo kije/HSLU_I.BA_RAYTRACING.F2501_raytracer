@@ -6,7 +6,6 @@ edition = "2024"
 [dependencies]
 minifb = "0.28"
 rayon = "1.10"
-mint = "0.5"
 ultraviolet = { version = "0.9", features = ["mint", "int", "f64", "num-traits"] }
 
 palette = { version = "0.7", git = "https://github.com/kije/palette.git", features = ["wide", "simba"] }
@@ -14,12 +13,18 @@ palette = { version = "0.7", git = "https://github.com/kije/palette.git", featur
 
 wide = "0.7"
 simd_aligned = "0.6"
-simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support"] }
+simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support", "rand"] }
 num-traits = "0.2"
 paste = "1.0.15"
 itertools = "0.14"
 
 incr_stats = { version = "1.0", optional = true }
+
+rand = { version = "0.8", features = ["min_const_gen", "nightly", "small_rng"] }
+# todo use
+o2o = "0.5.3"
+michie = "3.0.2"
+enum_dispatch = "0.3.13"
 
 [dev-dependencies]
 assert_float_eq = "1.1"

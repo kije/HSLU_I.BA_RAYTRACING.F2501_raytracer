@@ -11,7 +11,10 @@ use wide::{f32x4, f32x8};
 /// The basic scalar type
 ///
 /// This does not make any assumption on the algebraic properties of `Self`.
-pub trait Vector: Clone + PartialEq + Debug {
+pub trait Vector: Clone + PartialEq + Debug
+where
+    <Self::Scalar as SimdValue>::SimdBool: Debug,
+{
     type Scalar: Scalar + SimdValue;
     type InnerScalar: Scalar;
 
@@ -28,7 +31,6 @@ pub trait CommonVecOperations: Vector {
     fn broadcast(val: Self::Scalar) -> Self;
 
     fn dot(&self, other: Self) -> Self::Scalar;
-
     fn mag_sq(&self) -> Self::Scalar;
 
     fn mag(&self) -> Self::Scalar;
@@ -62,6 +64,10 @@ pub trait CommonVecOperations: Vector {
     fn zero() -> Self;
 
     fn one() -> Self;
+
+    fn sample_random() -> Self
+    where
+        rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar>;
 }
 
 pub trait CommonVecOperationsFloat: Vector {
@@ -96,6 +102,18 @@ pub trait CommonVecOperationsSimdOperations: Vector {
 pub trait CommonVecOperationsWithAssociations: VectorAssociations {
     fn rotate_by(&mut self, rotor: Self::Rotor);
     fn rotated_by(self, rotor: Self::Rotor) -> Self;
+}
+
+pub(crate) trait CheckVectorDimensionsMatch<const REQUIRED_DIMENSIONS: usize>:
+    Vector
+{
+    const CHECK: ();
+}
+
+impl<const REQUIRED_DIMENSIONS: usize, T: Vector + ?Sized>
+    CheckVectorDimensionsMatch<REQUIRED_DIMENSIONS> for T
+{
+    const CHECK: () = [()][(Self::DIMENSIONS == REQUIRED_DIMENSIONS) as usize];
 }
 
 #[inline(always)]
@@ -325,6 +343,21 @@ macro_rules! impl_vector {
             fn one() -> Self {
                 Self::one()
             }
+
+            fn sample_random() -> Self where rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar> {
+                use rand::Rng;
+                let mut rng = crate::random::pseudo_rng();
+                let random = rng.r#gen::<[$scalar_type; $dims]>();
+                let casted_random = (*unsafe { cast_simd_value::<[$scalar_type;$dims],[$inner_scalar;$dims]>(&random) });
+                casted_random.into()
+            }
+        }
+
+        impl crate::helpers::Splatable<$scalar_type> for $vec {
+            #[inline(always)]
+            fn splat(source: &$scalar_type) -> Self {
+                crate::vector::CommonVecOperations::broadcast(*source)
+            }
         }
 
         $(
@@ -362,3 +395,13 @@ impl_vector!(
         Vec4x8 (WideF32x8 = f32x8 | 8) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x8, (x,y,z,w)])}
     ] => 4
 );
+
+pub(crate) trait VectorAware<Vector>
+where
+    Vector: self::Vector,
+{
+    const LANES: usize = Vector::LANES;
+}
+
+// impl vector-aware trait for the vectors itslef
+impl<Vector> VectorAware<Vector> for Vector where Vector: self::Vector {}

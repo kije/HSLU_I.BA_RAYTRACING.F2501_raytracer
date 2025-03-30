@@ -1,6 +1,15 @@
+use crate::scalar::Scalar;
 use palette::rgb::Srgb;
+use simba::scalar::{Field, RealField, SubsetOf, SupersetOf};
+use simba::simd::{
+    SimdValue, WideBoolF32x4, WideBoolF32x8, WideBoolF64x4, WideF32x4, WideF32x8, WideF64x4,
+};
 use std::ops::Deref;
 use std::time::{Duration, Instant};
+use wide::{
+    f32x4, f32x8, f64x2, f64x4, i8x16, i8x32, i16x8, i16x16, i32x4, i32x8, i64x2, i64x4, u8x16,
+    u16x8, u16x16, u32x4, u32x8, u64x2, u64x4,
+};
 
 pub(crate) type ColorType<T = f32> = Srgb<T>;
 
@@ -31,6 +40,70 @@ impl Deref for Pixel {
     }
 }
 
+// fixme move this somewhere else / other module
+pub(crate) trait Splatable<Source> {
+    /// Create a new instance by "splatting" the source value across all SIMD lanes
+    fn splat(source: &Source) -> Self;
+}
+
+macro_rules! impl_splatable_primitives {
+    ($($t: ty),*) => {
+      $(
+        impl crate::helpers::Splatable<$t> for $t {
+            #[inline(always)]
+            fn splat(source: &$t) -> Self {
+                *source
+            }
+        }
+      )*
+    };
+}
+
+impl_splatable_primitives!(
+    i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize, f32, f64, bool
+);
+
+macro_rules! impl_splatable_wide {
+    ($($t: ty = $ts: ty $( as $cast: ident)?),*) => {
+      $(
+        impl crate::helpers::Splatable<$ts> for $t {
+            #[inline(always)]
+            fn splat(source: &$ts) -> Self {
+                <$t $(as $cast)?>::splat(*source)
+            }
+        }
+      )*
+    };
+}
+
+impl_splatable_wide!(
+    f32x4 = f32,
+    f32x8 = f32,
+    WideF32x4 = f32 as SimdValue,
+    WideF32x8 = f32 as SimdValue,
+    f64x2 = f64,
+    f64x4 = f64,
+    WideF64x4 = f64 as SimdValue,
+    i8x16 = i8,
+    i8x32 = i8,
+    i16x8 = i16,
+    i16x16 = i16,
+    i32x4 = i32,
+    i32x8 = i32,
+    i64x2 = i64,
+    i64x4 = i64,
+    u8x16 = u8,
+    u16x8 = u16,
+    u16x16 = u16,
+    u32x4 = u32,
+    u32x8 = u32,
+    u64x2 = u64,
+    u64x4 = u64,
+    WideBoolF64x4 = bool as SimdValue,
+    WideBoolF32x4 = bool as SimdValue,
+    WideBoolF32x8 = bool as SimdValue
+);
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub(crate) struct RenderTiming {
     pub iteration: u128,
@@ -41,6 +114,7 @@ pub(crate) struct RenderTiming {
 }
 
 impl Default for RenderTiming {
+    #[inline]
     fn default() -> Self {
         Self {
             start_time: Instant::now(),
