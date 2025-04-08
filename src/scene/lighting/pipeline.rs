@@ -1,8 +1,9 @@
 use crate::helpers::{ColorType, Splatable};
-use crate::scene::lighting::light::SceneLightSourceVector;
+use crate::scene::lighting::light::LightContribution; 
 use crate::scene::lighting::{Light, Lightable, SceneLightSource};
 use crate::scene::{AmbientLight, PointLight};
 use crate::vector::{CommonVecOperations, CommonVecOperationsSimdOperations, Vector};
+use crate::vector_traits::LightSourceVector;
 use num_traits::Zero;
 use palette::{Darken, Mix, Srgb};
 use simba::scalar::SupersetOf;
@@ -26,21 +27,13 @@ impl ShadingPipeline {
         > + Clone,
         position: Vector,
         ray_from_direction: Vector,
-    ) -> ColorType<Vector::Scalar>
+    ) -> ColorType<<Vector as crate::vector::Vector>::Scalar>
     where
-        Vector: 'a + SceneLightSourceVector,
-        Vector::Scalar: SimdRealField + Zero + Copy,
+        Vector: 'a + LightSourceVector,
         ColorType<Vector::Scalar>: Mix<Scalar = Vector::Scalar> + Darken<Scalar = Vector::Scalar>,
-        [(); <Vector as crate::vector::Vector>::DIMENSIONS]:, // <Vector as CommonVecOperationsSimdOperations>::SingleValueVector:
-                                                              //     CommonVecOperations
-                                                              //         + CommonVecOperationsSimdOperations
-                                                              //         + std::marker::Copy
-                                                              //         + Sub<
-                                                              //             <Vector as CommonVecOperationsSimdOperations>::SingleValueVector,
-                                                              //             Output = <Vector as CommonVecOperationsSimdOperations>::SingleValueVector,
-                                                              //         >,
-                                                              // <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as  crate::vector::Vector>::Scalar:
-                                                              //     std::marker::Copy + palette::num::Real + palette::num::Zero + palette::num::One + palette::num::Clamp,
+        <Vector as CommonVecOperationsSimdOperations>::SingleValueVector: LightSourceVector,
+        [(); <Vector as crate::vector::Vector>::DIMENSIONS]:,
+        [(); <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::DIMENSIONS]:,
     {
         let zero = Vector::Scalar::zero();
 
