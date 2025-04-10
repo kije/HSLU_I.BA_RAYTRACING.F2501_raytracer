@@ -9,9 +9,9 @@ use itertools::izip;
 // Import the consolidated traits
 use crate::color_traits::LightCompatibleColor;
 use crate::scalar_traits::LightScalar;
-use crate::vector_traits::{SimdVector, Vector3D};
+use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 
-use crate::vector::{CommonVecOperationsSimdOperations, Vector};
+use crate::vector::{SimdCapableVector, Vector};
 
 use crate::color::ColorSimdExt;
 use crate::geometry::{Ray, SphereData};
@@ -149,27 +149,23 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
     fn get_pixel_color_vectorized<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl IntoIterator<
-            Item = &'a SphereData<<V as CommonVecOperationsSimdOperations>::SingleValueVector>,
-        > + Clone,
-        lights: impl IntoIterator<
-            Item = &'a PointLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>,
-        > + Clone,
+        spheres: impl IntoIterator<Item = &'a SphereData<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone,
+        lights: impl IntoIterator<Item = &'a PointLight<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone,
     ) -> Option<(
         ColorType<V::Scalar>,
         <<V as Vector>::Scalar as SimdValue>::SimdBool,
     )>
     where
-        V: 'a + SimdVector,
+        V: 'a + SimdRenderingVector,
         V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>
-            + Splatable<
-                <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar,
-            >,
+            + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
         <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
         <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar> + Float,
         <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool>,
-        <V as CommonVecOperationsSimdOperations>::SingleValueVector: Vector3D,
-        <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar:
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector,
+        <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar:
             LightScalar + SubsetOf<<V as Vector>::Scalar>,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,

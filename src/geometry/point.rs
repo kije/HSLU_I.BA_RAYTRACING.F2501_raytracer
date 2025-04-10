@@ -2,27 +2,24 @@ use crate::geometry::Ray;
 use crate::helpers::Splatable;
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scalar_traits::LightScalar;
-use crate::vector::{
-    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsSimdOperations, VectorAware,
-};
-use crate::vector_traits::{Vector3D, VectorBasic};
-use num_traits::{NumOps, Zero};
+use crate::vector::{SimdCapableVector, VectorAware, VectorOperations};
+use crate::vector_traits::{BaseVector, RenderingVector};
 use simba::scalar::{SubsetOf, SupersetOf};
-use simba::simd::{SimdPartialOrd, SimdRealField, SimdValue};
-use std::ops::{Add, Mul, Neg, Sub};
+use simba::simd::{SimdPartialOrd, SimdValue};
+use std::ops::{Add, Neg, Sub};
 
 #[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
 pub(crate) struct PointData<V>
 where
-    V: VectorBasic,
+    V: BaseVector,
 {
     p: V,
 }
 
 impl<V> PointData<V>
 where
-    V: VectorBasic,
+    V: BaseVector,
 {
     pub(crate) const fn new(p: V) -> Self {
         Self { p }
@@ -31,7 +28,7 @@ where
 
 impl<V> PointData<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
+    V: RenderingVector + SimdCapableVector,
     V::Scalar: LightScalar,
 {
     pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
@@ -41,23 +38,25 @@ where
     }
 }
 
-impl<V> Splatable<PointData<<V as CommonVecOperationsSimdOperations>::SingleValueVector>> for PointData<V>
+impl<V> Splatable<PointData<<V as SimdCapableVector>::SingleValueVector>> for PointData<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
-    <V as CommonVecOperationsSimdOperations>::SingleValueVector: VectorBasic,
-    V::Scalar: LightScalar + SupersetOf<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    <<V as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<V as crate::vector::Vector>::Scalar>
+    V: RenderingVector + SimdCapableVector,
+    <V as SimdCapableVector>::SingleValueVector: BaseVector,
+    V::Scalar: LightScalar
+        + SupersetOf<<<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar>,
+    <<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar:
+        SubsetOf<<V as crate::vector::Vector>::Scalar>,
 {
-    fn splat(v: &PointData<<V as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
+    fn splat(v: &PointData<<V as SimdCapableVector>::SingleValueVector>) -> Self {
         Self {
             p: V::splat(v.p.clone()),
         }
     }
 }
 
-impl<V> VectorAware<V> for PointData<V> where V: VectorBasic {}
+impl<V> VectorAware<V> for PointData<V> where V: BaseVector {}
 
-impl<V: VectorBasic + Sub<V, Output = V>> Sub<V> for PointData<V> {
+impl<V: BaseVector + Sub<V, Output = V>> Sub<V> for PointData<V> {
     type Output = Self;
 
     fn sub(self, rhs: V) -> Self::Output {
@@ -65,7 +64,7 @@ impl<V: VectorBasic + Sub<V, Output = V>> Sub<V> for PointData<V> {
     }
 }
 
-impl<V: VectorBasic + Add<V, Output = V>> Add<V> for PointData<V> {
+impl<V: BaseVector + Add<V, Output = V>> Add<V> for PointData<V> {
     type Output = Self;
 
     fn add(self, rhs: V) -> Self::Output {
@@ -75,7 +74,7 @@ impl<V: VectorBasic + Add<V, Output = V>> Add<V> for PointData<V> {
 
 impl<V> Intersectable<V> for PointData<V>
 where
-    V: Vector3D,
+    V: RenderingVector,
     V::Scalar: LightScalar,
 {
     type RayType = Ray<V>;

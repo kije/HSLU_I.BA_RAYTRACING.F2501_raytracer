@@ -2,7 +2,7 @@ use crate::geometry::{Ray, SphereData};
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scalar_traits::LightScalar;
 use crate::vector::VectorAware;
-use crate::vector_traits::{Vector3D, VectorBasic};
+use crate::vector_traits::{RenderingVector, BaseVector};
 use num_traits::{Float, NumOps};
 use palette::bool_mask::BoolMask;
 use simba::simd::{SimdBool, SimdValue};
@@ -12,7 +12,7 @@ use ultraviolet::Vec3;
 #[repr(transparent)]
 pub(crate) enum SceneObject<Vector>
 where
-    Vector: VectorBasic,
+    Vector: BaseVector,
     Vector::Scalar: crate::scalar::Scalar + SimdValue,
 {
     Sphere(SphereData<Vector>),
@@ -20,14 +20,14 @@ where
 
 impl<Vector> VectorAware<Vector> for SceneObject<Vector>
 where
-    Vector: VectorBasic,
+    Vector: BaseVector,
     Vector::Scalar: crate::scalar::Scalar + SimdValue,
 {
 }
 
 impl<Vector> Intersectable<Vector> for SceneObject<Vector>
 where
-    Vector: Vector3D + crate::vector::Vector,
+    Vector: RenderingVector + crate::vector::Vector,
     Vector::Scalar:
         LightScalar<SimdBool: SimdBool + BoolMask> + NumOps<Vector::Scalar, Vector::Scalar>,
     <Vector::Scalar as SimdValue>::Element: Float + Copy,

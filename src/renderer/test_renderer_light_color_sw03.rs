@@ -7,10 +7,7 @@ use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::{Itertools, izip};
 
 use crate::scalar::Scalar;
-use crate::vector::{
-    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsReflectable,
-    CommonVecOperationsSimdOperations,
-};
+use crate::vector::{NormalizableVector, ReflectableVector, SimdCapableVector, VectorOperations};
 
 use num_traits::{Float, NumOps, One, Zero};
 use palette::blend::{Blend, Premultiply};
@@ -102,8 +99,7 @@ where
 
     pub fn to_reflected_ray(&self) -> Ray<Vector>
     where
-        Vector:
-            CommonVecOperations + CommonVecOperationsReflectable + CommonVecOperationsFloat + Copy,
+        Vector: VectorOperations + ReflectableVector + NormalizableVector + Copy,
         <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: From<bool>,
         [(); <Vector as crate::vector::Vector>::LANES]:,
     {
@@ -157,7 +153,7 @@ where
     #[inline]
     pub fn new(origin: Vector, direction: Vector) -> Self
     where
-        Vector: CommonVecOperationsFloat,
+        Vector: NormalizableVector,
         [(); <Vector as crate::vector::Vector>::LANES]:,
         <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: From<bool>,
     {
@@ -171,7 +167,7 @@ where
         valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
     ) -> Self
     where
-        Vector: CommonVecOperationsFloat,
+        Vector: NormalizableVector,
     {
         Self {
             origin,
@@ -183,7 +179,7 @@ where
     #[inline(always)]
     pub fn at(&self, t: Vector::Scalar) -> Vector
     where
-        Vector: CommonVecOperations + Copy,
+        Vector: VectorOperations + Copy,
     {
         self.direction.mul_add(Vector::broadcast(t), self.origin)
     }
@@ -222,7 +218,7 @@ where
     #[inline(always)]
     pub fn invalid_vector() -> Vector
     where
-        Vector: CommonVecOperations,
+        Vector: VectorOperations,
     {
         Vector::broadcast(Self::invalid_value_splatted())
     }
@@ -295,8 +291,8 @@ where
         + Sub<Vector, Output = Vector>
         + Mul<Vector, Output = Vector>
         + Copy
-        + CommonVecOperations
-        + CommonVecOperationsFloat,
+        + VectorOperations
+        + NormalizableVector,
     Vector::Scalar:
         Zero + Copy + NumOps<Vector::Scalar, Vector::Scalar> + SimdRealField + SimdPartialOrd,
     <Vector::Scalar as SimdValue>::Element: Float + Copy,
@@ -441,7 +437,7 @@ mod test_sphere_intersection {
 
 impl<Vector> SphereData<Vector>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
+    Vector: crate::vector::Vector + SimdCapableVector,
     Vector::Scalar:
         Zero + Clone + NumOps<Vector::Scalar, Vector::Scalar> + SimdRealField + SimdPartialOrd,
 {
@@ -458,12 +454,10 @@ where
         }
     }
 
-    fn splat(
-        v: &SphereData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>,
-    ) -> Self
+    fn splat(v: &SphereData<<Vector as SimdCapableVector>::SingleValueVector>) -> Self
     where
-        <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar:
-        SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
+        <<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar:
+            SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
     {
         Self {
             c: Vector::splat(v.c.clone()),
@@ -500,8 +494,8 @@ where
 impl<Vector> Intersectable for PointData<Vector>
 where
     Vector: crate::vector::Vector
-        + CommonVecOperations
-        + CommonVecOperationsFloat
+        + VectorOperations
+        + NormalizableVector
         + Copy
         + Add<Vector, Output = Vector>
         + Sub<Vector, Output = Vector>
@@ -558,7 +552,7 @@ where
 
 impl<Vector> PointData<Vector>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
+    Vector: crate::vector::Vector + SimdCapableVector,
     Vector::Scalar:
         Zero + Clone + NumOps<Vector::Scalar, Vector::Scalar> + SimdRealField + SimdPartialOrd,
     <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: Debug,
@@ -569,11 +563,11 @@ where
         }
     }
 
-    fn splat(v: &PointData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self
+    fn splat(v: &PointData<<Vector as SimdCapableVector>::SingleValueVector>) -> Self
     where
-        <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar:
+        <<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar:
         SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
-        <<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: Debug,
+        <<<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: Debug,
     {
         Self {
             p: Vector::splat(v.p.clone()),
@@ -760,30 +754,57 @@ impl<C: OutputColorEncoder> TestRenderer3DLightColorSW03<C> {
         Some(Pixel(colors))
     }
 
-    fn get_pixel_color_vectorized<'a, Vector>(coords: Vector, unit_z: Vector, spheres: impl IntoIterator<Item=&'a SphereData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>>, lights: impl IntoIterator<Item=&'a SphereData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>>) -> Option<(ColorType<Vector::Scalar>,  <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool)>
+    fn get_pixel_color_vectorized<'a, Vector>(
+        coords: Vector,
+        unit_z: Vector,
+        spheres: impl IntoIterator<
+            Item = &'a SphereData<<Vector as SimdCapableVector>::SingleValueVector>,
+        >,
+        lights: impl IntoIterator<
+            Item = &'a SphereData<<Vector as SimdCapableVector>::SingleValueVector>,
+        >,
+    ) -> Option<(
+        ColorType<Vector::Scalar>,
+        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
+    )>
     where
-        Vector: 'a + crate::vector::Vector + Copy + CommonVecOperations + CommonVecOperationsFloat + CommonVecOperationsSimdOperations
-        + Add<Vector, Output = Vector>
-        + Sub<Vector, Output = Vector>
-        + Mul<Vector, Output = Vector>,
-        Vector::Scalar:
-        Zero  + One + Copy + NumOps<Vector::Scalar, Vector::Scalar> + SimdRealField + SimdPartialOrd + SubsetOf<<Vector as crate::vector::Vector>::Scalar>
-    + palette::num::Real
-    + palette::num::Zero
-    + palette::num::One
-    + palette::num::Arithmetics
-    + palette::num::Clamp
-    + palette::num::Sqrt
-    + palette::num::Abs
-    + palette::num::PartialCmp
-    + HasBoolMask
-    + palette::num::MinMax,
-    ColorType<<Vector as crate::vector::Vector>::Scalar>: Premultiply<Scalar = Vector::Scalar> + StimulusColor + ArrayCast<Array = [Vector::Scalar; <Vector as crate::vector::Vector>::DIMENSIONS]>,
-        <<Vector as crate::vector::Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<Vector as crate::vector::Vector>::Scalar>,
+        Vector: 'a
+            + crate::vector::Vector
+            + Copy
+            + VectorOperations
+            + NormalizableVector
+            + SimdCapableVector
+            + Add<Vector, Output = Vector>
+            + Sub<Vector, Output = Vector>
+            + Mul<Vector, Output = Vector>,
+        Vector::Scalar: Zero
+            + One
+            + Copy
+            + NumOps<Vector::Scalar, Vector::Scalar>
+            + SimdRealField
+            + SimdPartialOrd
+            + SubsetOf<<Vector as crate::vector::Vector>::Scalar>
+            + palette::num::Real
+            + palette::num::Zero
+            + palette::num::One
+            + palette::num::Arithmetics
+            + palette::num::Clamp
+            + palette::num::Sqrt
+            + palette::num::Abs
+            + palette::num::PartialCmp
+            + HasBoolMask
+            + palette::num::MinMax,
+        ColorType<<Vector as crate::vector::Vector>::Scalar>: Premultiply<Scalar = Vector::Scalar>
+            + StimulusColor
+            + ArrayCast<Array = [Vector::Scalar; <Vector as crate::vector::Vector>::DIMENSIONS]>,
+        <<Vector as crate::vector::Vector>::Scalar as HasBoolMask>::Mask:
+            LazySelect<<Vector as crate::vector::Vector>::Scalar>,
         <Vector::Scalar as SimdValue>::Element: Float + Copy,
-        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: Debug + SimdValue<Element = bool>,
+        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool:
+            Debug + SimdValue<Element = bool>,
         [(); <Vector as crate::vector::Vector>::LANES]:,
-        <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
+        <<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar:
+            SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
     {
         let ray = Ray::<Vector>::new_with_mask(
             coords,

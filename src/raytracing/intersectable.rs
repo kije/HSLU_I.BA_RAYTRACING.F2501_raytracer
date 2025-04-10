@@ -1,7 +1,5 @@
 use crate::geometry::Ray;
-use crate::vector::{
-    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsReflectable, VectorAware,
-};
+use crate::vector::{NormalizableVector, ReflectableVector, VectorAware, VectorOperations};
 
 use simba::simd::SimdValue;
 use std::fmt::Debug;
@@ -104,8 +102,7 @@ where
 
     pub fn to_reflected_ray(&self) -> Ray<Vector>
     where
-        Vector:
-            CommonVecOperations + CommonVecOperationsReflectable + CommonVecOperationsFloat + Copy,
+        Vector: VectorOperations + ReflectableVector + NormalizableVector + Copy,
         <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: From<bool>,
         [(); <Vector as crate::vector::Vector>::LANES]:,
     {

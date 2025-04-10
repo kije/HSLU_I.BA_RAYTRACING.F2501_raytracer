@@ -3,8 +3,8 @@ use crate::color_traits::LightCompatibleColor;
 use crate::helpers::{ColorType, Splatable};
 use crate::scalar_traits::LightScalar;
 use crate::scene::lighting::Lightable;
-use crate::vector::{CommonVecOperations, CommonVecOperationsSimdOperations, Vector, VectorAware};
-use crate::vector_traits::Vector3D;
+use crate::vector::{SimdCapableVector, Vector, VectorAware, VectorOperations};
+use crate::vector_traits::RenderingVector;
 use enum_dispatch::enum_dispatch;
 use num_traits::{One, Zero};
 use palette::blend::Premultiply;
@@ -62,7 +62,7 @@ where
 /// Base trait for all light types
 pub(crate) trait Light<V>
 where
-    V: Vector3D,
+    V: RenderingVector,
     V::Scalar: LightScalar,
 {
     /// Calculate the lighting contribution at a point for a lightable object
@@ -77,7 +77,7 @@ where
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct AmbientLight<V>
 where
-    V: Vector3D,
+    V: RenderingVector,
     V::Scalar: LightScalar,
 {
     pub(crate) color: ColorType<V::Scalar>,
@@ -86,7 +86,7 @@ where
 
 impl<V> AmbientLight<V>
 where
-    V: Vector3D,
+    V: RenderingVector,
     V::Scalar: LightScalar,
 {
     pub const fn new(color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
@@ -96,7 +96,7 @@ where
 
 impl<V> AmbientLight<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
+    V: RenderingVector + SimdCapableVector,
     V::Scalar: LightScalar,
 {
     pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
@@ -110,21 +110,18 @@ where
     }
 }
 
-impl<V> Splatable<AmbientLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>>
-    for AmbientLight<V>
+impl<V> Splatable<AmbientLight<<V as SimdCapableVector>::SingleValueVector>> for AmbientLight<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
+    V: RenderingVector + SimdCapableVector,
     V::Scalar: LightScalar
-        + SupersetOf<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>
-        + Splatable<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>,
-    <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar:
+        + SupersetOf<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>
+        + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+    <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar:
         LightScalar + SubsetOf<<V as Vector>::Scalar>,
     <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
-    <V as CommonVecOperationsSimdOperations>::SingleValueVector: Vector3D,
+    <V as SimdCapableVector>::SingleValueVector: RenderingVector,
 {
-    fn splat(
-        v: &AmbientLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>,
-    ) -> Self {
+    fn splat(v: &AmbientLight<<V as SimdCapableVector>::SingleValueVector>) -> Self {
         Self {
             intensity: V::Scalar::from_subset(&v.intensity),
             color: Splatable::splat(&v.color),
@@ -132,11 +129,11 @@ where
     }
 }
 
-impl<V: Vector3D<Scalar: LightScalar>> VectorAware<V> for AmbientLight<V> {}
+impl<V: RenderingVector<Scalar: LightScalar>> VectorAware<V> for AmbientLight<V> {}
 
 impl<V> Light<V> for AmbientLight<V>
 where
-    V: Vector3D + Copy,
+    V: RenderingVector + Copy,
     V::Scalar: LightScalar,
     ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
 {
@@ -172,7 +169,7 @@ where
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct PointLight<V>
 where
-    V: Vector3D,
+    V: RenderingVector,
     V::Scalar: LightScalar,
 {
     pub(crate) position: V,
@@ -182,7 +179,7 @@ where
 
 impl<V> PointLight<V>
 where
-    V: Vector3D,
+    V: RenderingVector,
     V::Scalar: LightScalar,
 {
     pub(crate) const fn new(
@@ -200,7 +197,7 @@ where
 
 impl<V> PointLight<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
+    V: RenderingVector + SimdCapableVector,
     V::Scalar: LightScalar,
 {
     pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
@@ -215,20 +212,19 @@ where
     }
 }
 
-impl<V> Splatable<PointLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>>
-    for PointLight<V>
+impl<V> Splatable<PointLight<<V as SimdCapableVector>::SingleValueVector>> for PointLight<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
+    V: RenderingVector + SimdCapableVector,
     V::Scalar: Clone
         + LightScalar
-        + SupersetOf<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>
-        + Splatable<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>,
-    <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar:
+        + SupersetOf<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>
+        + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+    <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar:
         LightScalar + SubsetOf<<V as Vector>::Scalar>,
     <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
-    <V as CommonVecOperationsSimdOperations>::SingleValueVector: Vector3D,
+    <V as SimdCapableVector>::SingleValueVector: RenderingVector,
 {
-    fn splat(v: &PointLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
+    fn splat(v: &PointLight<<V as SimdCapableVector>::SingleValueVector>) -> Self {
         Self {
             position: V::splat(v.position.clone()),
             intensity: V::Scalar::from_subset(&v.intensity),
@@ -237,11 +233,11 @@ where
     }
 }
 
-impl<V: Vector3D<Scalar: LightScalar>> VectorAware<V> for PointLight<V> {}
+impl<V: RenderingVector<Scalar: LightScalar>> VectorAware<V> for PointLight<V> {}
 
 impl<V> Light<V> for PointLight<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations + Copy,
+    V: RenderingVector + SimdCapableVector + Copy,
     V::Scalar: LightScalar,
     ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
     <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
@@ -291,7 +287,7 @@ where
 #[enum_dispatch(Light<V>)]
 pub(crate) enum SceneLightSource<V>
 where
-    V: Vector3D + CommonVecOperationsSimdOperations,
+    V: RenderingVector + SimdCapableVector,
     V::Scalar: LightScalar,
     ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
     <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,

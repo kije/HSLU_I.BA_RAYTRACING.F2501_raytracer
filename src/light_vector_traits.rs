@@ -4,7 +4,7 @@ use simba::simd::SimdValue;
 
 /// A simple trait that provides just the scalar operations needed for light calculations
 /// without complex trait bounds
-pub trait LightVectorOps: Sized {
+pub trait LightingOperations: Sized {
     type Vector: Vector;
     type Scalar: SimdValue;
 
@@ -44,13 +44,13 @@ pub trait LightVectorOps: Sized {
     fn negate(a: Self::Scalar) -> Self::Scalar;
 }
 
-// Concrete implementations for the types we need
+// Concrete implementation helper types
 pub struct Vec3Helper;
 pub struct Vec3x4Helper;
 pub struct Vec3x8Helper;
 
 // Implementation for the standard Vec3
-impl LightVectorOps for Vec3Helper {
+impl LightingOperations for Vec3Helper {
     type Vector = ultraviolet::Vec3;
     type Scalar = f32;
 

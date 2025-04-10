@@ -27,7 +27,7 @@ pub trait VectorAssociations: Vector {
     type Rotor;
 }
 
-pub trait CommonVecOperations: Vector {
+pub trait VectorOperations: Vector {
     fn broadcast(val: Self::Scalar) -> Self;
 
     fn dot(&self, other: Self) -> Self::Scalar;
@@ -70,7 +70,7 @@ pub trait CommonVecOperations: Vector {
         rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar>;
 }
 
-pub trait CommonVecOperationsFloat: Vector {
+pub trait NormalizableVector: Vector {
     fn normalize(&mut self);
 
     #[must_use = "Did you mean to use `.normalize()` to normalize `self` in place?"]
@@ -81,13 +81,13 @@ pub trait CommonVecOperationsFloat: Vector {
     }
 }
 
-pub trait CommonVecOperationsReflectable: Vector {
+pub trait ReflectableVector: Vector {
     fn reflect(&mut self, normal: Self);
 
     fn reflected(&self, normal: Self) -> Self;
 }
 
-pub trait CommonVecOperationsSimdOperations: Vector {
+pub trait SimdCapableVector: Vector {
     type SingleValueVector: Vector;
     /// Blend two vectors together lanewise using `mask` as a mask.
     ///
@@ -99,7 +99,7 @@ pub trait CommonVecOperationsSimdOperations: Vector {
     fn splat(vec: Self::SingleValueVector) -> Self;
 }
 
-pub trait CommonVecOperationsWithAssociations: VectorAssociations {
+pub trait RotatableVector: VectorAssociations {
     fn rotate_by(&mut self, rotor: Self::Rotor);
     fn rotated_by(self, rotor: Self::Rotor) -> Self;
 }
@@ -147,7 +147,7 @@ mod test_cast_simd_value {
 
 macro_rules! impl_vector {
     (SIMD_OPS[$low_vec:ty, $mask_wide_type:ty, ($($component:ident),+)] ;; $vec:ident) => {
-          impl crate::vector::CommonVecOperationsSimdOperations for $vec {
+          impl crate::vector::SimdCapableVector for $vec {
             type SingleValueVector = $low_vec;
 
              #[inline(always)]
@@ -171,7 +171,7 @@ macro_rules! impl_vector {
         }
     };
     (MANUAL_SIMD_OPS[$low_vec:ty, $mask_wide_type:ty, ($($component:ident),+)] ;; $vec:ident) => {
-          impl crate::vector::CommonVecOperationsSimdOperations for $vec {
+          impl crate::vector::SimdCapableVector for $vec {
             type SingleValueVector = $low_vec;
 
              #[inline(always)]
@@ -204,7 +204,7 @@ macro_rules! impl_vector {
         }
     };
     (REFLECTABLE ;; $vec:ident) => {
-         impl crate::vector::CommonVecOperationsReflectable for $vec {
+         impl crate::vector::ReflectableVector for $vec {
             #[inline(always)]
             fn reflect(&mut self, normal: Self){
                 $vec::reflect(self, normal);
@@ -217,7 +217,7 @@ macro_rules! impl_vector {
         }
     };
     (FLOAT ;; $vec:ident) => {
-          impl crate::vector::CommonVecOperationsFloat for $vec {
+          impl crate::vector::NormalizableVector for $vec {
             #[inline(always)]
             fn normalize(&mut self) {
                 $vec::normalize(self);
@@ -244,7 +244,7 @@ macro_rules! impl_vector {
             const DIMENSIONS: usize = $dims;
         }
 
-        impl crate::vector::CommonVecOperations for $vec {
+        impl crate::vector::VectorOperations for $vec {
             #[inline(always)]
             fn broadcast(val: Self::Scalar) -> Self {
                 Self::broadcast(
@@ -356,7 +356,7 @@ macro_rules! impl_vector {
         impl crate::helpers::Splatable<$scalar_type> for $vec {
             #[inline(always)]
             fn splat(source: &$scalar_type) -> Self {
-                crate::vector::CommonVecOperations::broadcast(*source)
+                crate::vector::VectorOperations::broadcast(*source)
             }
         }
 
@@ -366,7 +366,7 @@ macro_rules! impl_vector {
                 type Rotor = $rotor_type;
             }
 
-            impl crate::vector::CommonVecOperationsWithAssociations for $vec {
+            impl crate::vector::RotatableVector for $vec {
                fn rotate_by(&mut self, rotor: Self::Rotor) {
                    $vec::rotate_by(self, rotor);
                }

@@ -22,7 +22,6 @@ pub(crate) mod color_traits;
 pub(crate) mod macros;
 pub(crate) mod scalar_traits;
 pub(crate) mod simd_compat;
-pub(crate) mod vector_mask_traits;
 pub(crate) mod vector_traits;
 
 use crate::helpers::RenderTiming;

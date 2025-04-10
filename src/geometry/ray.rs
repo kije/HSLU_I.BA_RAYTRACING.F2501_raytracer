@@ -1,4 +1,4 @@
-use crate::vector::{CommonVecOperations, CommonVecOperationsFloat, VectorAware};
+use crate::vector::{NormalizableVector, SimdCapableVector, VectorAware, VectorOperations};
 use num_traits::Float;
 use simba::simd::SimdValue;
 use std::fmt::Debug;
@@ -21,7 +21,7 @@ where
     #[inline]
     pub(crate) fn new(origin: Vector, direction: Vector) -> Self
     where
-        Vector: CommonVecOperationsFloat,
+        Vector: NormalizableVector,
         [(); <Vector as crate::vector::Vector>::LANES]:,
         <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: From<bool>,
     {
@@ -35,7 +35,7 @@ where
         valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
     ) -> Self
     where
-        Vector: CommonVecOperationsFloat,
+        Vector: NormalizableVector,
     {
         Self {
             origin,
@@ -47,7 +47,7 @@ where
     #[inline(always)]
     pub(crate) fn at(&self, t: Vector::Scalar) -> Vector
     where
-        Vector: CommonVecOperations + Copy,
+        Vector: VectorOperations + Copy,
     {
         self.direction.mul_add(Vector::broadcast(t), self.origin)
     }
@@ -74,7 +74,7 @@ where
     #[inline(always)]
     pub(crate) fn invalid_vector() -> Vector
     where
-        Vector: CommonVecOperations,
+        Vector: VectorOperations,
     {
         Vector::broadcast(Self::invalid_value_splatted())
     }
