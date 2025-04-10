@@ -6,8 +6,13 @@ use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::{Itertools, izip};
 
+// Import the consolidated traits
+use crate::color_traits::LightCompatibleColor;
+use crate::scalar_traits::LightScalar;
+use crate::vector_traits::{SimdVector, Vector3D, VectorBasic};
+
 use crate::vector::{
-    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsSimdOperations,
+    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsSimdOperations, Vector,
 };
 
 use crate::color::ColorSimdExt;
@@ -16,7 +21,7 @@ use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate
 use crate::scene::{AmbientLight, Light, PointLight};
 use num_traits::{Float, NumOps, One, Zero};
 use palette::blend::{Blend, Premultiply};
-use palette::bool_mask::{HasBoolMask, LazySelect};
+use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect};
 use palette::cast::ArrayCast;
 use palette::stimulus::StimulusColor;
 use palette::{Darken, Mix, Srgb};
@@ -32,7 +37,6 @@ use std::ops::{Add, Mul, Sub};
 use std::sync::LazyLock;
 use std::thread;
 use ultraviolet::{Vec3, Vec3x8, f32x8};
-// Todo optimization-idea: ensure that ray direction & normals (on intersection) are unit vectors in constructors. This way we can simplify the maths in certain cases
 
 static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
     [
@@ -149,38 +153,41 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
         Some(Pixel(colors))
     }
 
-    fn get_pixel_color_vectorized<'a, Vector>(coords: Vector, unit_z: Vector, spheres: impl IntoIterator<Item=&'a SphereData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>>+Clone, lights: impl IntoIterator<Item=&'a PointLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>>+Clone) -> Option<(ColorType<Vector::Scalar>,  <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool)>
+    // Significantly simplified trait bounds using consolidated traits
+    fn get_pixel_color_vectorized<'a, V>(
+        coords: V,
+        unit_z: V,
+        spheres: impl IntoIterator<
+            Item = &'a SphereData<<V as CommonVecOperationsSimdOperations>::SingleValueVector>,
+        > + Clone,
+        lights: impl IntoIterator<
+            Item = &'a PointLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>,
+        > + Clone,
+    ) -> Option<(
+        ColorType<V::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool,
+    )>
     where
-        Vector: 'a + crate::vector::Vector + Copy + CommonVecOperations + CommonVecOperationsFloat + CommonVecOperationsSimdOperations
-        + Add<Vector, Output = Vector>
-        + Sub<Vector, Output = Vector>
-        + Mul<Vector, Output = Vector>,
-        Vector::Scalar:
-        Zero  + One + Copy + NumOps<Vector::Scalar, Vector::Scalar> + SimdRealField + SimdPartialOrd + SubsetOf<<Vector as crate::vector::Vector>::Scalar>
-        + Splatable<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>
-    + palette::num::Real
-    + palette::num::Zero
-    + palette::num::One
-    + palette::num::Arithmetics
-    + palette::num::Clamp
-    + palette::num::Sqrt
-    + palette::num::Abs
-    + palette::num::PartialCmp
-    + HasBoolMask
-    + palette::num::MinMax,
-     Standard: Distribution<Vector::Scalar>,
-    ColorType<<Vector as crate::vector::Vector>::Scalar>: Premultiply<Scalar = Vector::Scalar> + StimulusColor + ArrayCast<Array = [Vector::Scalar; <Vector as crate::vector::Vector>::DIMENSIONS]>,
-        <<Vector as crate::vector::Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<Vector as crate::vector::Vector>::Scalar>,
-        <Vector::Scalar as SimdValue>::Element: Float + Copy,
-        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: Debug + SimdValue<Element = bool>,
-        [(); <Vector as crate::vector::Vector>::LANES]:,
-        <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<Vector as crate::vector::Vector>::Scalar>, <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element: SubsetOf<<Vector as crate::vector::Vector>::Scalar>
+        V: 'a + SimdVector,
+        V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>
+            + Splatable<
+                <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar,
+            >,
+        <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar> + Float,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool>,
+        <V as CommonVecOperationsSimdOperations>::SingleValueVector: Vector3D,
+        <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar:
+            LightScalar + SubsetOf<<V as Vector>::Scalar>,
+        ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        Standard: Distribution<<V as Vector>::Scalar>,
+        [(); <V as Vector>::LANES]:,
     {
-        let raytrace = move |coords: Vector| {
-            let ray = Ray::<Vector>::new_with_mask(
+        let raytrace = move |coords: V| {
+            let ray = Ray::<V>::new_with_mask(
                 coords,
                 unit_z,
-                <Vector::Scalar as SimdValue>::SimdBool::splat(false), // todo check if it matters if we use false or tre here: logic-wise and performance-wise
+                <V::Scalar as SimdValue>::SimdBool::splat(false),
             );
 
             let nearest_intersection =
@@ -188,7 +195,7 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
                     .clone()
                     .into_iter()
                     .fold(None, |previous_intersection, sphere| {
-                        let sphere = SphereData::<Vector>::splat(sphere);
+                        let sphere = SphereData::<V>::splat(sphere);
                         let new_intersection = sphere.check_intersection(&ray, Cow::Owned(sphere));
 
                         // if we have no intersection, return previous nearest_intersection
@@ -226,7 +233,7 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
                         let previous_valid = previous_intersection.valid_mask;
                         let new_valid = new_intersection.valid_mask;
 
-                        // 1) Compute the “pick old” mask in a single step.
+                        // 1) Compute the "pick old" mask in a single step.
                         let pick_old_mask =
                             // If old is valid but new is not:
                             (previous_valid & !new_valid)
@@ -238,7 +245,7 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
                             .t
                             .select(pick_old_mask.clone(), new_intersection.t);
 
-                        let merged_payload = SphereData::<Vector>::blend(
+                        let merged_payload = SphereData::<V>::blend(
                             pick_old_mask,
                             &previous_intersection.payload,
                             &new_intersection.payload,
@@ -282,22 +289,22 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
 
             //////////////////////
 
-            let zero = Vector::Scalar::zero();
+            let zero = V::Scalar::zero();
 
             let ambient_light = AmbientLight::new(
                 ColorType::new(
-                    Vector::Scalar::from_subset(&1.0),
-                    Vector::Scalar::from_subset(&1.0),
-                    Vector::Scalar::from_subset(&1.0),
+                    V::Scalar::from_subset(&1.0),
+                    V::Scalar::from_subset(&1.0),
+                    V::Scalar::from_subset(&1.0),
                 ),
-                Vector::Scalar::from_subset(&0.08),
+                V::Scalar::from_subset(&0.08),
             );
 
             // Fixme replace manual ambient lighting amount/color with AmbientIllumination struct
-            let mut light_color = Srgb::<Vector::Scalar>::new(zero, zero, zero);
+            let mut light_color = Srgb::<V::Scalar>::new(zero, zero, zero);
 
             for light in lights.clone().into_iter() {
-                let light = PointLight::<Vector>::splat(light);
+                let light = PointLight::<V>::splat(light);
                 let direct_light_contribution = light.calculate_contribution_at(
                     intersected_object.as_ref(),
                     intersection_point,
@@ -307,7 +314,7 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
                     + ColorType::blend(
                         direct_light_contribution.valid_mask,
                         &(direct_light_contribution.color * direct_light_contribution.intensity),
-                        &Srgb::<Vector::Scalar>::new(zero, zero, zero),
+                        &Srgb::<V::Scalar>::new(zero, zero, zero),
                     );
             }
 
@@ -321,7 +328,7 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
                 ColorType::blend(
                     valid_mask,
                     &((ambient_color.color * ambient_color.intensity) + light_color),
-                    &Srgb::<Vector::Scalar>::new(zero, zero, zero),
+                    &Srgb::<V::Scalar>::new(zero, zero, zero),
                 ),
                 valid_mask,
             ))
@@ -335,20 +342,14 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
         if antialiasing {
             // FIXME: Antialiasing does not need to do the lighting step (?), just the intersection and object color step
             let mut valid_mask = None;
-            let mut res_color = ColorType::new(
-                Vector::Scalar::zero(),
-                Vector::Scalar::zero(),
-                Vector::Scalar::zero(),
-            );
+            let mut res_color =
+                ColorType::new(V::Scalar::zero(), V::Scalar::zero(), V::Scalar::zero());
             let samples_per_pixel = 32;
-            let scale = Vector::Scalar::from_subset(&(1.0 / samples_per_pixel as f32));
+            let scale = V::Scalar::from_subset(&(1.0 / samples_per_pixel as f32));
             for _ in 0..samples_per_pixel {
-                let vec = Vector::sample_random();
+                let vec = V::sample_random();
                 let (color, mask) = raytrace(coords + vec).unwrap_or_else(|| {
-                    (
-                        res_color,
-                        <Vector::Scalar as SimdValue>::SimdBool::splat(false),
-                    )
+                    (res_color, <V::Scalar as SimdValue>::SimdBool::splat(false))
                 });
 
                 if valid_mask.is_none() {

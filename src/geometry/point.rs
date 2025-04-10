@@ -1,103 +1,84 @@
 use crate::geometry::Ray;
 use crate::helpers::Splatable;
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
+use crate::scalar_traits::LightScalar;
 use crate::vector::{
     CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsSimdOperations, VectorAware,
 };
+use crate::vector_traits::{Vector3D, VectorBasic};
 use num_traits::{NumOps, Zero};
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdPartialOrd, SimdRealField, SimdValue};
-use std::fmt::Debug;
 use std::ops::{Add, Mul, Neg, Sub};
 
 #[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
-pub(crate) struct PointData<Vector>
+pub(crate) struct PointData<V>
 where
-    Vector: crate::vector::Vector,
+    V: VectorBasic,
 {
-    p: Vector,
+    p: V,
 }
 
-impl<Vector> PointData<Vector>
+impl<V> PointData<V>
 where
-    Vector: crate::vector::Vector,
+    V: VectorBasic,
 {
-    pub(crate) const fn new(p: Vector) -> Self {
+    pub(crate) const fn new(p: V) -> Self {
         Self { p }
     }
 }
 
-impl<Vector> PointData<Vector>
+impl<V> PointData<V>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
-    Vector::Scalar:
-        Zero + Clone + NumOps<Vector::Scalar, Vector::Scalar> + SimdRealField + SimdPartialOrd,
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    V::Scalar: LightScalar,
 {
-    pub(crate) fn blend(mask: <Vector::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
+    pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
         Self {
-            p: Vector::blend(mask, t.p.clone(), f.p.clone()),
-        }
-    }
-
-    // pub(crate) fn splat(v: &PointData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self
-    // where
-    //     <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar:
-    //     SubsetOf<<Vector as crate::vector::Vector>::Scalar>
-    // {
-    //     Self {
-    //         p: Vector::splat(v.p.clone()),
-    //     }
-    // }
-}
-
-impl<Vector> Splatable<PointData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>> for PointData<Vector>
-where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
-    Vector::Scalar: Clone + SimdRealField + SupersetOf<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<Vector as crate::vector::Vector>::Scalar>
-{
-    fn splat(v: &PointData<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
-        Self {
-            p: Vector::splat(v.p.clone()),
+            p: V::blend(mask, t.p.clone(), f.p.clone()),
         }
     }
 }
 
-impl<Vector> VectorAware<Vector> for PointData<Vector> where Vector: crate::vector::Vector {}
-
-impl<Vector: crate::vector::Vector + Sub<Vector, Output = Vector>> Sub<Vector>
-    for PointData<Vector>
+impl<V> Splatable<PointData<<V as CommonVecOperationsSimdOperations>::SingleValueVector>> for PointData<V>
+where
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    <V as CommonVecOperationsSimdOperations>::SingleValueVector: VectorBasic,
+    V::Scalar: LightScalar + SupersetOf<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
+    <<V as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<V as crate::vector::Vector>::Scalar>
 {
+    fn splat(v: &PointData<<V as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
+        Self {
+            p: V::splat(v.p.clone()),
+        }
+    }
+}
+
+impl<V> VectorAware<V> for PointData<V> where V: VectorBasic {}
+
+impl<V: VectorBasic + Sub<V, Output = V>> Sub<V> for PointData<V> {
     type Output = Self;
 
-    fn sub(self, rhs: Vector) -> Self::Output {
+    fn sub(self, rhs: V) -> Self::Output {
         Self { p: self.p - rhs }
     }
 }
 
-impl<Vector: crate::vector::Vector + Add<Vector, Output = Vector>> Add<Vector>
-    for PointData<Vector>
-{
+impl<V: VectorBasic + Add<V, Output = V>> Add<V> for PointData<V> {
     type Output = Self;
 
-    fn add(self, rhs: Vector) -> Self::Output {
+    fn add(self, rhs: V) -> Self::Output {
         Self { p: self.p + rhs }
     }
 }
 
-impl<Vector> Intersectable<Vector> for PointData<Vector>
+impl<V> Intersectable<V> for PointData<V>
 where
-    Vector: crate::vector::Vector
-        + CommonVecOperations
-        + CommonVecOperationsFloat
-        + Copy
-        + Add<Vector, Output = Vector>
-        + Sub<Vector, Output = Vector>
-        + Mul<Vector, Output = Vector>,
-    Vector::Scalar: Zero + Copy + crate::scalar::Scalar + SimdValue + SimdRealField,
+    V: Vector3D,
+    V::Scalar: LightScalar,
 {
-    type RayType = Ray<Vector>;
+    type RayType = Ray<V>;
 
     type ReturnTypeWrapper<T> = T;
 
@@ -105,14 +86,14 @@ where
         &'a self,
         ray: &'_ Self::RayType,
         payload: P,
-    ) -> Self::ReturnTypeWrapper<RayIntersectionCandidate<Vector::Scalar, P>> {
+    ) -> Self::ReturnTypeWrapper<RayIntersectionCandidate<V::Scalar, P>> {
         let p = self.p;
         let v = p - ray.origin;
         let t = v.dot(ray.direction);
 
         let intersection_valid = (ray.at(t) - p)
             .mag_sq()
-            .simd_lt(Vector::Scalar::from_subset(&0.001));
+            .simd_lt(V::Scalar::from_subset(&0.001));
 
         RayIntersectionCandidate::new(t, payload, intersection_valid)
     }
@@ -120,8 +101,8 @@ where
     fn intersect<'a>(
         &'a self,
         ray: &'_ Self::RayType,
-        candidate: &'_ RayIntersectionCandidate<Vector::Scalar, &'a Self>,
-    ) -> Self::ReturnTypeWrapper<RayIntersection<Vector>> {
+        candidate: &'_ RayIntersectionCandidate<V::Scalar, &'a Self>,
+    ) -> Self::ReturnTypeWrapper<RayIntersection<V>> {
         let t = candidate.t;
         let valid_mask = candidate.valid_mask;
 
@@ -133,7 +114,7 @@ where
             ray.direction.clone(),
             n,
             (p - ray.origin).mag(),
-            Vector::Scalar::from_subset(&1.0),
+            V::Scalar::from_subset(&1.0),
             valid_mask,
         )
     }

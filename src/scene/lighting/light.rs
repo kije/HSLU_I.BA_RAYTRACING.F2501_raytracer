@@ -1,38 +1,29 @@
 use crate::color::ColorSimdExt;
+use crate::color_traits::LightCompatibleColor;
 use crate::helpers::{ColorType, Splatable};
-use crate::scalar::Scalar;
+use crate::scalar_traits::LightScalar;
 use crate::scene::lighting::Lightable;
-use crate::vector::{
-    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsSimdOperations, Vector,
-    VectorAware,
-};
+use crate::vector::{CommonVecOperations, CommonVecOperationsSimdOperations, Vector, VectorAware};
+use crate::vector_traits::Vector3D;
 use enum_dispatch::enum_dispatch;
 use num_traits::{One, Zero};
 use palette::blend::Premultiply;
-use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect};
-use palette::cast::ArrayCast;
-use palette::stimulus::StimulusColor;
-use palette::{Darken, Lighten, Mix, Srgb};
-use simba::scalar::SubsetOf;
-use simba::scalar::SupersetOf;
-use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue};
+use palette::bool_mask::BoolMask;
+use simba::scalar::{SubsetOf, SupersetOf};
+use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct LightContribution<Scalar>
+pub(crate) struct LightContribution<S>
 where
-    Scalar: crate::scalar::Scalar + SimdValue,
+    S: LightScalar,
 {
-    pub(crate) color: ColorType<Scalar>,
-    pub(crate) intensity: Scalar,
-    pub(crate) valid_mask: Scalar::SimdBool,
+    pub(crate) color: ColorType<S>,
+    pub(crate) intensity: S,
+    pub(crate) valid_mask: S::SimdBool,
 }
 
-impl<Scalar: crate::scalar::Scalar + SimdValue> LightContribution<Scalar> {
-    pub(crate) const fn new(
-        color: ColorType<Scalar>,
-        intensity: Scalar,
-        valid_mask: Scalar::SimdBool,
-    ) -> Self {
+impl<S: LightScalar> LightContribution<S> {
+    pub(crate) const fn new(color: ColorType<S>, intensity: S, valid_mask: S::SimdBool) -> Self {
         Self {
             color,
             intensity,
@@ -41,21 +32,22 @@ impl<Scalar: crate::scalar::Scalar + SimdValue> LightContribution<Scalar> {
     }
 }
 
-impl<Scalar: crate::scalar::Scalar + palette::num::Zero + SimdValue<SimdBool: SimdBool + BoolMask>>
-    palette::num::Zero for LightContribution<Scalar>
-{
+impl<S: LightScalar<SimdBool: SimdBool + BoolMask>> palette::num::Zero for LightContribution<S> {
     #[inline]
     fn zero() -> Self {
         Self {
-            color: ColorType::new(Scalar::zero(), Scalar::zero(), Scalar::zero()),
-            intensity: Scalar::zero(),
-            valid_mask: Scalar::SimdBool::from_bool(false),
+            color: ColorType::new(
+                <S as num_traits::Zero>::zero(),
+                <S as num_traits::Zero>::zero(),
+                <S as num_traits::Zero>::zero(),
+            ),
+            intensity: <S as num_traits::Zero>::zero(),
+            valid_mask: S::SimdBool::from_bool(false),
         }
     }
 }
 
-impl<Scalar: crate::scalar::Scalar + palette::num::Zero + SimdValue<SimdBool: SimdBool + BoolMask>>
-    Default for LightContribution<Scalar>
+impl<S: LightScalar> Default for LightContribution<S>
 where
     Self: palette::num::Zero,
 {
@@ -68,128 +60,104 @@ where
 
 #[enum_dispatch]
 /// Base trait for all light types
-pub(crate) trait Light<Vector>
+pub(crate) trait Light<V>
 where
-    Vector: crate::vector::Vector,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D,
+    V::Scalar: LightScalar,
 {
     /// Calculate the lighting contribution at a point for a lightable object
     fn calculate_contribution_at(
         &self,
-        lightable: &impl Lightable<Vector>,
-        position: Vector,
-        ray_from_direction: Vector,
-    ) -> LightContribution<Vector::Scalar>;
+        lightable: &impl Lightable<V>,
+        position: V,
+        ray_from_direction: V,
+    ) -> LightContribution<V::Scalar>;
 }
 
-// fixme this does not depend on Vector, just scalar
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct AmbientLight<Vector>
+pub(crate) struct AmbientLight<V>
 where
-    Vector: crate::vector::Vector,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D,
+    V::Scalar: LightScalar,
 {
-    pub(crate) color: ColorType<Vector::Scalar>,
-    pub(crate) intensity: Vector::Scalar,
+    pub(crate) color: ColorType<V::Scalar>,
+    pub(crate) intensity: V::Scalar,
 }
 
-impl<Vector> AmbientLight<Vector>
+impl<V> AmbientLight<V>
 where
-    Vector: crate::vector::Vector,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D,
+    V::Scalar: LightScalar,
 {
-    pub const fn new(color: ColorType<Vector::Scalar>, intensity: Vector::Scalar) -> Self {
+    pub const fn new(color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
         Self { color, intensity }
     }
 }
 
-impl<Vector> AmbientLight<Vector>
+impl<V> AmbientLight<V>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    V::Scalar: LightScalar,
 {
-    pub(crate) fn blend(mask: <Vector::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
+    pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
     where
-        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element:
-            SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
     {
         Self {
             color: ColorSimdExt::blend(mask, &t.color, &f.color),
             intensity: t.intensity.clone().select(mask, f.intensity.clone()),
         }
     }
-
-    // pub(crate) fn splat(v: &PointLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self
-    // where
-    //     <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar:
-    //     SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
-    //     Vector::Scalar:   Clone +  SimdRealField + SupersetOf<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    //     <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element: SubsetOf<<Vector as crate::vector::Vector>::Scalar>
-    // {
-    //     Self {
-    //         intensity: Vector::Scalar::from_subset(&v.intensity),
-    //         color: ColorSimdExt::splat(&v.color),
-    //     }
-    // }
 }
 
-impl<Vector> Splatable<AmbientLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>> for AmbientLight<Vector>
+impl<V> Splatable<AmbientLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>>
+    for AmbientLight<V>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
-    Vector::Scalar: Clone + SimdRealField + SupersetOf<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar> + Splatable<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
-    <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element: SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    V::Scalar: LightScalar
+        + SupersetOf<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>
+        + Splatable<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>,
+    <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar:
+        LightScalar + SubsetOf<<V as Vector>::Scalar>,
+    <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
+    <V as CommonVecOperationsSimdOperations>::SingleValueVector: Vector3D,
 {
-    fn splat(v: &AmbientLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
+    fn splat(
+        v: &AmbientLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>,
+    ) -> Self {
         Self {
-            intensity: Vector::Scalar::from_subset(&v.intensity),
+            intensity: V::Scalar::from_subset(&v.intensity),
             color: Splatable::splat(&v.color),
         }
     }
 }
 
-impl<Vector> VectorAware<Vector> for AmbientLight<Vector> where Vector: crate::vector::Vector {}
+impl<V: Vector3D<Scalar: LightScalar>> VectorAware<V> for AmbientLight<V> {}
 
-impl<Vector> Light<Vector> for AmbientLight<Vector>
+impl<V> Light<V> for AmbientLight<V>
 where
-    Vector: crate::vector::Vector + CommonVecOperations + Copy,
-    Vector::Scalar: Scalar
-        + SimdValue
-        + SimdRealField
-        + palette::num::Real
-        + palette::num::Zero
-        + palette::num::One
-        + palette::num::Arithmetics
-        + palette::num::Clamp
-        + palette::num::Sqrt
-        + palette::num::Abs
-        + palette::num::PartialCmp
-        + HasBoolMask
-        + palette::num::MinMax,
-    <<Vector as crate::vector::Vector>::Scalar as HasBoolMask>::Mask:
-        LazySelect<<Vector as crate::vector::Vector>::Scalar>,
-    ColorType<<Vector as crate::vector::Vector>::Scalar>: Premultiply<Scalar = Vector::Scalar>
-        + StimulusColor
-        + ArrayCast<Array = [Vector::Scalar; <Vector as crate::vector::Vector>::DIMENSIONS]>,
+    V: Vector3D + Copy,
+    V::Scalar: LightScalar,
+    ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
 {
     fn calculate_contribution_at(
         &self,
-        lightable: &impl Lightable<Vector>,
-        point: Vector,
-        ray_from_direction: Vector,
-    ) -> LightContribution<Vector::Scalar> {
+        lightable: &impl Lightable<V>,
+        point: V,
+        ray_from_direction: V,
+    ) -> LightContribution<V::Scalar> {
         // Apply ambient lighting to the material color
         let material = lightable.get_material_color_at(point);
 
-        let one = Vector::Scalar::one();
-        let zero = Vector::Scalar::zero();
+        let one = V::Scalar::one();
+        let zero = V::Scalar::zero();
 
         let normal = lightable.get_surface_normal_at(point);
 
         let incident_light_angle_cos = -ray_from_direction.dot(normal);
 
         let rescaled_incident_angle =
-            (incident_light_angle_cos.clone() + one) / Vector::Scalar::from_subset(&2.75);
+            (incident_light_angle_cos.clone() + one) / V::Scalar::from_subset(&2.75);
 
         let intensity = rescaled_incident_angle * self.intensity.clone();
 
@@ -198,31 +166,29 @@ where
             intensity,
             incident_light_angle_cos.simd_gt(zero),
         )
-
-        //(material.darken_fixed(Vector::Scalar::one() - intensity)) * self.color.clone()
     }
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct PointLight<Vector>
+pub(crate) struct PointLight<V>
 where
-    Vector: crate::vector::Vector,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D,
+    V::Scalar: LightScalar,
 {
-    pub(crate) position: Vector,
-    pub(crate) color: ColorType<Vector::Scalar>,
-    pub(crate) intensity: Vector::Scalar,
+    pub(crate) position: V,
+    pub(crate) color: ColorType<V::Scalar>,
+    pub(crate) intensity: V::Scalar,
 }
 
-impl<Vector> PointLight<Vector>
+impl<V> PointLight<V>
 where
-    Vector: crate::vector::Vector,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D,
+    V::Scalar: LightScalar,
 {
     pub(crate) const fn new(
-        position: Vector,
-        color: ColorType<Vector::Scalar>,
-        intensity: Vector::Scalar, // fixme how do we get this to be always between 0.0 and 1.0?
+        position: V,
+        color: ColorType<V::Scalar>,
+        intensity: V::Scalar,
     ) -> Self {
         Self {
             position,
@@ -232,97 +198,65 @@ where
     }
 }
 
-impl<Vector> PointLight<Vector>
+impl<V> PointLight<V>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
-    Vector::Scalar: SimdValue + Scalar,
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    V::Scalar: LightScalar,
 {
-    pub(crate) fn blend(mask: <Vector::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
+    pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
     where
-        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element:
-            SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
     {
         Self {
-            position: Vector::blend(mask, t.position.clone(), f.position.clone()),
+            position: V::blend(mask, t.position.clone(), f.position.clone()),
             color: ColorSimdExt::blend(mask, &t.color, &f.color),
             intensity: t.intensity.clone().select(mask, f.intensity.clone()),
         }
     }
-
-    // pub(crate) fn splat(v: &PointLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self
-    // where
-    //     <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar:
-    //     SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
-    //     Vector::Scalar:   Clone +  SimdRealField + SupersetOf<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    //     <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element: SubsetOf<<Vector as crate::vector::Vector>::Scalar>
-    // {
-    //     Self {
-    //         position: Vector::splat(v.position.clone()),
-    //         intensity: Vector::Scalar::from_subset(&v.intensity),
-    //         color: ColorSimdExt::splat(&v.color),
-    //     }
-    // }
 }
 
-impl<Vector> Splatable<PointLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>> for PointLight<Vector>
+impl<V> Splatable<PointLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>>
+    for PointLight<V>
 where
-    Vector: crate::vector::Vector + CommonVecOperationsSimdOperations,
-    Vector::Scalar: Clone + SimdRealField + SupersetOf<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar> + Splatable<<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    <<Vector as CommonVecOperationsSimdOperations>::SingleValueVector as crate::vector::Vector>::Scalar: SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
-    <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element: SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    V::Scalar: Clone
+        + LightScalar
+        + SupersetOf<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>
+        + Splatable<<<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar>,
+    <<V as CommonVecOperationsSimdOperations>::SingleValueVector as Vector>::Scalar:
+        LightScalar + SubsetOf<<V as Vector>::Scalar>,
+    <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
+    <V as CommonVecOperationsSimdOperations>::SingleValueVector: Vector3D,
 {
-    fn splat(v: &PointLight<<Vector as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
+    fn splat(v: &PointLight<<V as CommonVecOperationsSimdOperations>::SingleValueVector>) -> Self {
         Self {
-            position: Vector::splat(v.position.clone()),
-            intensity: Vector::Scalar::from_subset(&v.intensity),
+            position: V::splat(v.position.clone()),
+            intensity: V::Scalar::from_subset(&v.intensity),
             color: Splatable::splat(&v.color),
         }
     }
 }
 
-impl<Vector: crate::vector::Vector> VectorAware<Vector> for PointLight<Vector> {}
+impl<V: Vector3D<Scalar: LightScalar>> VectorAware<V> for PointLight<V> {}
 
-impl<Vector> Light<Vector> for PointLight<Vector>
+impl<V> Light<V> for PointLight<V>
 where
-    Vector: crate::vector::Vector
-        + CommonVecOperations
-        + CommonVecOperationsSimdOperations
-        + Copy
-        + std::ops::Sub<Vector, Output = Vector>,
-    Vector::Scalar: SimdValue
-        + Copy
-        + Scalar
-        + SimdRealField
-        + palette::num::Real
-        + palette::num::Zero
-        + palette::num::One
-        + palette::num::Arithmetics
-        + palette::num::Clamp
-        + palette::num::Sqrt
-        + palette::num::Abs
-        + palette::num::PartialCmp
-        + HasBoolMask
-        + palette::num::MinMax
-        + std::ops::Sub<Vector::Scalar, Output = Vector::Scalar>,
-    <<Vector as crate::vector::Vector>::Scalar as HasBoolMask>::Mask:
-        LazySelect<<Vector as crate::vector::Vector>::Scalar>,
-    <<Vector as crate::vector::Vector>::Scalar as SimdValue>::Element:
-        SubsetOf<<Vector as crate::vector::Vector>::Scalar>,
-    ColorType<<Vector as crate::vector::Vector>::Scalar>: Premultiply<Scalar = Vector::Scalar>
-        + StimulusColor
-        + ArrayCast<Array = [Vector::Scalar; <Vector as crate::vector::Vector>::DIMENSIONS]>,
+    V: Vector3D + CommonVecOperationsSimdOperations + Copy,
+    V::Scalar: LightScalar,
+    ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+    <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
 {
     fn calculate_contribution_at(
         &self,
-        lightable: &impl Lightable<Vector>,
-        point_position: Vector,
-        ray_from_direction: Vector,
-    ) -> LightContribution<Vector::Scalar> {
-        let zero = Vector::Scalar::zero();
-        let one = Vector::Scalar::one();
-        let epsilon = Vector::Scalar::from_subset(&f32::EPSILON);
-        let half = Vector::Scalar::from_subset(&0.15);
-        let thousand = Vector::Scalar::from_subset(&35000.0); // Fixme strange hardcoded constant
+        lightable: &impl Lightable<V>,
+        point_position: V,
+        ray_from_direction: V,
+    ) -> LightContribution<V::Scalar> {
+        let zero = V::Scalar::zero();
+        let one = V::Scalar::one();
+        let epsilon = V::Scalar::from_subset(&f32::EPSILON);
+        let half = V::Scalar::from_subset(&0.15);
+        let thousand = V::Scalar::from_subset(&35000.0); // Fixme strange hardcoded constant
 
         let normal = lightable.get_surface_normal_at(point_position);
         let material = lightable.get_material_color_at(point_position);
@@ -353,37 +287,14 @@ where
         )
     }
 }
-pub(crate) trait SceneLightSourceVector:
-    Vector<
-        Scalar: SimdValue<Element: SubsetOf<Self::Scalar>>
-                    + Copy
-                    + Scalar
-                    + SimdRealField
-                    + palette::num::Real
-                    + palette::num::Zero
-                    + palette::num::One
-                    + palette::num::Arithmetics
-                    + palette::num::Clamp
-                    + palette::num::Sqrt
-                    + palette::num::Abs
-                    + palette::num::PartialCmp
-                    + HasBoolMask<Mask: LazySelect<Self::Scalar>>
-                    + palette::num::MinMax
-                    + std::ops::Sub<Self::Scalar, Output = Self::Scalar>,
-    > + CommonVecOperations
-    + CommonVecOperationsSimdOperations
-    + Copy
-    + std::ops::Sub<Self, Output = Self>
-{
-}
-#[enum_dispatch(Light<Vector>)]
-pub(crate) enum SceneLightSource<Vector>
+
+#[enum_dispatch(Light<V>)]
+pub(crate) enum SceneLightSource<V>
 where
-    Vector: SceneLightSourceVector,
-    ColorType<Vector::Scalar>: Premultiply<Scalar = Vector::Scalar>
-        + StimulusColor
-        + ArrayCast<Array = [Vector::Scalar; <Vector as crate::vector::Vector>::DIMENSIONS]>,
-    [(); <Vector as crate::vector::Vector>::DIMENSIONS]:,
+    V: Vector3D + CommonVecOperationsSimdOperations,
+    V::Scalar: LightScalar,
+    ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+    <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
 {
-    PointLight(PointLight<Vector>),
+    PointLight(PointLight<V>),
 }

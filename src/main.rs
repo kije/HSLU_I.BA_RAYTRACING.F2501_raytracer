@@ -3,20 +3,27 @@
 #![feature(core_intrinsics)]
 #![allow(incomplete_features)]
 
-mod extensions;
-// mod geometry;
-mod helpers;
-mod image_buffer;
-// mod math;
-mod color;
-mod geometry;
-mod output;
-mod random;
-mod raytracing;
-mod renderer;
-mod scalar;
-mod scene;
-mod vector;
+pub(crate) mod color;
+pub(crate) mod extensions;
+pub(crate) mod geometry;
+pub(crate) mod helpers;
+pub(crate) mod image_buffer;
+pub(crate) mod math;
+pub(crate) mod output;
+pub(crate) mod random;
+pub(crate) mod raytracing;
+pub(crate) mod renderer;
+pub(crate) mod scalar;
+pub(crate) mod scene;
+pub(crate) mod vector;
+
+// New modules for trait simplification
+pub(crate) mod color_traits;
+pub(crate) mod macros;
+pub(crate) mod scalar_traits;
+pub(crate) mod simd_compat;
+pub(crate) mod vector_mask_traits;
+pub(crate) mod vector_traits;
 
 use crate::helpers::RenderTiming;
 use crate::image_buffer::ImageBuffer;

@@ -7,8 +7,6 @@ use num_traits::Zero;
 use palette::{Darken, Mix, Srgb};
 use simba::scalar::SupersetOf;
 use simba::simd::SimdRealField;
-use std::error::Error;
-use std::ops::Sub;
 
 /// Pipeline for calculating lighting on objects
 #[derive(Debug, Clone, Copy)]

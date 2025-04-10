@@ -1,5 +1,4 @@
 use crate::geometry::Ray;
-use crate::scene::SceneObject;
 use crate::vector::{
     CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsReflectable, VectorAware,
 };

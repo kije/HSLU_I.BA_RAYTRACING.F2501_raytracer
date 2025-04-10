@@ -1,8 +1,6 @@
 use crate::helpers::{ColorType, Splatable};
-use crate::vector::CommonVecOperationsSimdOperations;
-use simba::scalar::{SubsetOf, SupersetOf};
-use simba::simd::{SimdRealField, SimdValue};
-use wide::f32x8;
+use simba::scalar::SubsetOf;
+use simba::simd::SimdValue;
 
 // fixme: this might be a trait thai is not only useful to have for colors, e.g. geometry and basically anything VectorAware (or SimdSclaraAware) could use this?
 pub(crate) trait ColorSimdExt<Scalar>
