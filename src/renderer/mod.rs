@@ -6,8 +6,6 @@ use std::sync::atomic::Ordering;
 
 #[cfg(feature = "render_timing_debug")]
 use incr_stats::vec::Stats;
-use itertools::{Itertools, multiunzip};
-use std::ops::{Range, RangeFull};
 #[cfg(feature = "render_timing_debug")]
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

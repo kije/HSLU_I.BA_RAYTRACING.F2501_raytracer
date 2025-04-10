@@ -3,12 +3,11 @@ use crate::image_buffer::ImageBuffer;
 use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
-use itertools::{Chunk, Itertools, izip};
+use itertools::izip;
 use palette::Darken;
-use palette::blend::Blend;
 use std::intrinsics::{likely, unlikely};
 use std::marker::PhantomData;
-use ultraviolet::{Vec2x4, Vec3, Vec3x4, Vec3x8, f32x4, f32x8};
+use ultraviolet::{Vec3, Vec3x4, Vec3x8, f32x4, f32x8};
 use wide::CmpGt;
 
 struct Ray {

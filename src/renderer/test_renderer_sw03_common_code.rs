@@ -4,38 +4,30 @@ use crate::image_buffer::ImageBuffer;
 use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
-use itertools::{Itertools, izip};
+use itertools::izip;
 
 // Import the consolidated traits
 use crate::color_traits::LightCompatibleColor;
 use crate::scalar_traits::LightScalar;
-use crate::vector_traits::{SimdVector, Vector3D, VectorBasic};
+use crate::vector_traits::{SimdVector, Vector3D};
 
-use crate::vector::{
-    CommonVecOperations, CommonVecOperationsFloat, CommonVecOperationsSimdOperations, Vector,
-};
+use crate::vector::{CommonVecOperationsSimdOperations, Vector};
 
 use crate::color::ColorSimdExt;
 use crate::geometry::{Ray, SphereData};
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scene::{AmbientLight, Light, PointLight};
-use num_traits::{Float, NumOps, One, Zero};
-use palette::blend::{Blend, Premultiply};
+use num_traits::{Float, Zero};
+use palette::Srgb;
 use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect};
-use palette::cast::ArrayCast;
-use palette::stimulus::StimulusColor;
-use palette::{Darken, Mix, Srgb};
 use rand::distributions::{Distribution, Standard};
-use rand::{Rng, random};
 use simba::scalar::{SubsetOf, SupersetOf};
-use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue};
+use simba::simd::{SimdBool, SimdPartialOrd, SimdValue};
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::intrinsics::{likely, unlikely};
 use std::marker::PhantomData;
-use std::ops::{Add, Mul, Sub};
 use std::sync::LazyLock;
-use std::thread;
 use ultraviolet::{Vec3, Vec3x8, f32x8};
 
 static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
