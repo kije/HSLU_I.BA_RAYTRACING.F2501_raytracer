@@ -2,7 +2,7 @@ use crate::geometry::Ray;
 use crate::helpers::Splatable;
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scalar_traits::LightScalar;
-use crate::vector::{SimdCapableVector, VectorAware, VectorOperations};
+use crate::vector::{SimdCapableVector, VectorAware};
 use crate::vector_traits::{BaseVector, RenderingVector};
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdPartialOrd, SimdValue};

@@ -5,30 +5,34 @@ use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::izip;
+use rayon::iter::ParallelIterator;
 
 // Import the consolidated traits
 use crate::color_traits::LightCompatibleColor;
 use crate::scalar_traits::LightScalar;
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 
-use crate::vector::{SimdCapableVector, Vector};
+use crate::vector::{NormalizableVector, SimdCapableVector, Vector};
 
 use crate::color::ColorSimdExt;
 use crate::geometry::{Ray, SphereData};
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scene::{AmbientLight, Light, PointLight};
-use num_traits::{Float, Zero};
+use num_traits::{Float, One, Zero};
 use palette::Srgb;
 use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect};
 use rand::distributions::{Distribution, Standard};
+use rayon::iter::IntoParallelIterator;
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdBool, SimdPartialOrd, SimdValue};
-use std::borrow::Cow;
 use std::fmt::Debug;
-use std::intrinsics::{likely, unlikely};
+use std::hint::{likely, unlikely};
 use std::marker::PhantomData;
 use std::sync::LazyLock;
 use ultraviolet::{Vec3, Vec3x8, f32x8};
+
+// Helper type alias to make the bounds more readable
+type SingleValueVectorScalar<V> = <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar;
 
 static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
     [
@@ -150,6 +154,43 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
         coords: V,
         unit_z: V,
         spheres: impl IntoIterator<Item = &'a SphereData<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone
+        + Sync,
+        lights: impl IntoIterator<Item = &'a PointLight<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone
+        + Sync,
+    ) -> Option<(
+        ColorType<V::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool,
+    )>
+    where
+        V: 'a + SimdRenderingVector,
+        V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>
+            + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+        <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar> + Float,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool> + Send + Sync,
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector + NormalizableVector,
+        SingleValueVectorScalar<V>: LightScalar + SubsetOf<V::Scalar> + palette::num::Real,
+        ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        Standard: Distribution<<V as Vector>::Scalar>,
+        [(); <V as Vector>::LANES]:,
+    {
+        // Determine if we should use antialiasing
+        let antialiasing = cfg!(feature = "anti_aliasing");
+
+        if antialiasing {
+            Self::antialiased_raytrace(coords, unit_z, spheres, lights)
+        } else {
+            Self::single_raytrace(coords, unit_z, spheres, lights)
+        }
+    }
+
+    // Separate function for a single raytrace calculation
+    fn single_raytrace<'a, V>(
+        coords: V,
+        unit_z: V,
+        spheres: impl IntoIterator<Item = &'a SphereData<<V as SimdCapableVector>::SingleValueVector>>
         + Clone,
         lights: impl IntoIterator<Item = &'a PointLight<<V as SimdCapableVector>::SingleValueVector>>
         + Clone,
@@ -164,196 +205,247 @@ impl<C: OutputColorEncoder> TestRenderer3DSW03CommonCode<C> {
         <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
         <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar> + Float,
         <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool>,
-        <V as SimdCapableVector>::SingleValueVector: RenderingVector,
-        <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar:
-            LightScalar + SubsetOf<<V as Vector>::Scalar>,
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector + NormalizableVector,
+        SingleValueVectorScalar<V>: LightScalar + SubsetOf<V::Scalar> + palette::num::Real,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
-        [(); <V as Vector>::LANES]:,
     {
-        let raytrace = move |coords: V| {
-            let ray = Ray::<V>::new_with_mask(
-                coords,
-                unit_z,
-                <V::Scalar as SimdValue>::SimdBool::splat(false),
-            );
+        let ray = Ray::<V>::new_with_mask(
+            coords,
+            unit_z,
+            <V::Scalar as SimdValue>::SimdBool::splat(false),
+        );
 
-            let nearest_intersection =
-                spheres
-                    .clone()
-                    .into_iter()
-                    .fold(None, |previous_intersection, sphere| {
-                        let sphere = SphereData::<V>::splat(sphere);
-                        let new_intersection = sphere.check_intersection(&ray, Cow::Owned(sphere));
+        // Find nearest intersection
+        let nearest_intersection = Self::find_nearest_intersection(&ray, spheres)?;
 
-                        // if we have no intersection, return previous nearest_intersection
-                        if new_intersection.valid_mask.none() {
-                            return previous_intersection;
-                        }
+        if nearest_intersection.valid_mask.none() {
+            return None;
+        }
 
-                        // if nearest_intersection is none, return current intersection
-                        let Some(previous_intersection) = previous_intersection else {
-                            return Some(new_intersection);
-                        };
+        // Calculate intersection details
+        let intersected_object = nearest_intersection.payload;
+        let RayIntersection {
+            intersection: intersection_point,
+            valid_mask,
+            normal: _intersection_normal,
+            ..
+        } = intersected_object.intersect(
+            &ray,
+            &RayIntersectionCandidate::new(
+                nearest_intersection.t,
+                &intersected_object,
+                nearest_intersection.valid_mask,
+            ),
+        );
 
-                        // if nearest_intersection has no intersections, return current intersection (as this is by now guaranteed to have at least one intersection)
-                        if previous_intersection.valid_mask.none() {
-                            return Some(new_intersection);
-                        }
+        // Calculate lighting
+        let color = Self::calculate_lighting(
+            &intersected_object,
+            intersection_point,
+            ray.direction.normalized(),
+            valid_mask,
+            lights,
+        );
 
-                        let new_is_nearer = previous_intersection.t.simd_ge(new_intersection.t);
+        Some((color, valid_mask))
+    }
 
-                        if new_is_nearer.none() {
-                            return Some(previous_intersection);
-                        } else if new_is_nearer.all() {
-                            return Some(new_intersection);
-                        }
+    // Find the nearest intersection among all objects
+    fn find_nearest_intersection<'a, V>(
+        ray: &Ray<V>,
+        spheres: impl IntoIterator<Item = &'a SphereData<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone,
+    ) -> Option<RayIntersectionCandidate<V::Scalar, SphereData<V>>>
+    where
+        V: 'a + SimdRenderingVector,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
+        V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>
+            + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+        <V::Scalar as SimdValue>::Element: Float + Copy,
+        <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool>,
+        SingleValueVectorScalar<V>: LightScalar + SubsetOf<V::Scalar>,
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector + NormalizableVector,
+    {
+        spheres
+            .clone()
+            .into_iter()
+            .fold(None, |previous_intersection, sphere| {
+                let sphere = SphereData::<V>::splat(sphere);
+                let new_intersection = sphere.check_intersection(ray, sphere);
 
-                        // now the complex case:
-                        // we need to merge the two intersections
-                        // compare nearest_intersection's with intersection (take the minimum of the two)
-                        // but take care that we only consider valid values (the ones where both valid masks are ture)
-                        // for the values where only one of the valid maks are true (xor both valiud masks), take the one
-                        // from the intersection where it is true
-
-                        // Suppose previous_intersection is the best intersection found so far.
-                        // new_intersect is from the current sphere (using the final_t & final_valid_mask above).
-                        let previous_valid = previous_intersection.valid_mask;
-                        let new_valid = new_intersection.valid_mask;
-
-                        // 1) Compute the "pick old" mask in a single step.
-                        let pick_old_mask =
-                            // If old is valid but new is not:
-                            (previous_valid & !new_valid)
-                                // OR if both are valid but old is nearer:
-                                | (previous_valid & new_valid & !new_is_nearer);
-
-                        // 2) Blend each field once using the same mask.
-                        let merged_t = previous_intersection
-                            .t
-                            .select(pick_old_mask.clone(), new_intersection.t);
-
-                        let merged_payload = SphereData::<V>::blend(
-                            pick_old_mask,
-                            &previous_intersection.payload,
-                            &new_intersection.payload,
-                        );
-
-                        // 3) The new valid lanes are old OR new
-                        let merged_valid = previous_valid | new_valid;
-
-                        let merged_candidate = RayIntersectionCandidate::new(
-                            merged_t,
-                            Cow::Owned(merged_payload),
-                            merged_valid,
-                        );
-
-                        Some(merged_candidate)
-                    });
-
-            let Some(nearest_intersection) = nearest_intersection else {
-                return None;
-            };
-
-            if nearest_intersection.valid_mask.none() {
-                return None;
-            }
-
-            let intersected_object = nearest_intersection.payload;
-            let RayIntersection {
-                distance,
-                intersection: intersection_point,
-                valid_mask,
-                normal: intersection_normal,
-                ..
-            } = intersected_object.intersect(
-                &ray,
-                &RayIntersectionCandidate::new(
-                    nearest_intersection.t,
-                    intersected_object.as_ref(),
-                    nearest_intersection.valid_mask,
-                ),
-            );
-
-            //////////////////////
-
-            let zero = V::Scalar::zero();
-
-            let ambient_light = AmbientLight::new(
-                ColorType::new(
-                    V::Scalar::from_subset(&1.0),
-                    V::Scalar::from_subset(&1.0),
-                    V::Scalar::from_subset(&1.0),
-                ),
-                V::Scalar::from_subset(&0.08),
-            );
-
-            // Fixme replace manual ambient lighting amount/color with AmbientIllumination struct
-            let mut light_color = Srgb::<V::Scalar>::new(zero, zero, zero);
-
-            for light in lights.clone().into_iter() {
-                let light = PointLight::<V>::splat(light);
-                let direct_light_contribution = light.calculate_contribution_at(
-                    intersected_object.as_ref(),
-                    intersection_point,
-                    ray.direction.normalized(),
-                );
-                light_color = light_color
-                    + ColorType::blend(
-                        direct_light_contribution.valid_mask,
-                        &(direct_light_contribution.color * direct_light_contribution.intensity),
-                        &Srgb::<V::Scalar>::new(zero, zero, zero),
-                    );
-            }
-
-            let ambient_color = ambient_light.calculate_contribution_at(
-                intersected_object.as_ref(),
-                intersection_point,
-                ray.direction.normalized(),
-            );
-
-            Some((
-                ColorType::blend(
-                    valid_mask,
-                    &((ambient_color.color * ambient_color.intensity) + light_color),
-                    &Srgb::<V::Scalar>::new(zero, zero, zero),
-                ),
-                valid_mask,
-            ))
-        };
-
-        // fixme move this antialiasing somewhere else
-        // probably better if we would do it in such a way as to fill a entire simd x8 lane with variations to raytrace that map to 1 pixel
-        // this way we would
-        let antialiasing = false;
-
-        if antialiasing {
-            // FIXME: Antialiasing does not need to do the lighting step (?), just the intersection and object color step
-            let mut valid_mask = None;
-            let mut res_color =
-                ColorType::new(V::Scalar::zero(), V::Scalar::zero(), V::Scalar::zero());
-            let samples_per_pixel = 32;
-            let scale = V::Scalar::from_subset(&(1.0 / samples_per_pixel as f32));
-            for _ in 0..samples_per_pixel {
-                let vec = V::sample_random();
-                let (color, mask) = raytrace(coords + vec).unwrap_or_else(|| {
-                    (res_color, <V::Scalar as SimdValue>::SimdBool::splat(false))
-                });
-
-                if valid_mask.is_none() {
-                    valid_mask = Some(mask);
+                // If no intersection with current object, keep previous result
+                if new_intersection.valid_mask.none() {
+                    return previous_intersection;
                 }
 
-                valid_mask = valid_mask.map(|valid_mask| valid_mask | mask);
+                // If no previous intersection, use current
+                let Some(previous_intersection) = previous_intersection else {
+                    return Some(new_intersection);
+                };
 
-                res_color +=
-                    ColorType::new(color.red * scale, color.green * scale, color.blue * scale);
-            }
+                // If previous has no valid intersections, use current
+                if previous_intersection.valid_mask.none() {
+                    return Some(new_intersection);
+                }
 
-            valid_mask.map(|valid_mask| (res_color, valid_mask))
-        } else {
-            raytrace(coords)
+                // Compare distances
+                let new_is_nearer = previous_intersection.t.simd_ge(new_intersection.t);
+
+                // Simple cases: one is entirely closer than the other
+                if new_is_nearer.none() {
+                    return Some(previous_intersection);
+                } else if new_is_nearer.all() {
+                    return Some(new_intersection);
+                }
+
+                // Complex case: merge intersections based on which is closer for each lane
+                Self::merge_intersections(&previous_intersection, &new_intersection, new_is_nearer)
+            })
+    }
+
+    // Merge two intersections based on which one is closer for each SIMD lane
+    fn merge_intersections<V>(
+        previous: &RayIntersectionCandidate<V::Scalar, SphereData<V>>,
+        new: &RayIntersectionCandidate<V::Scalar, SphereData<V>>,
+        new_is_nearer: <<V as Vector>::Scalar as SimdValue>::SimdBool,
+    ) -> Option<RayIntersectionCandidate<V::Scalar, SphereData<V>>>
+    where
+        V: SimdRenderingVector,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
+        V::Scalar: LightScalar,
+        <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool>,
+        SingleValueVectorScalar<V>: LightScalar + SubsetOf<V::Scalar>,
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector + NormalizableVector,
+    {
+        let previous_valid = previous.valid_mask;
+        let new_valid = new.valid_mask;
+
+        // Compute the mask for picking previous intersection values
+        let pick_old_mask =
+            (previous_valid & !new_valid) | (previous_valid & new_valid & !new_is_nearer);
+
+        // Blend fields using the mask
+        let merged_t = previous.t.select(pick_old_mask.clone(), new.t);
+        let merged_payload = SphereData::<V>::blend(pick_old_mask, &previous.payload, &new.payload);
+        let merged_valid = previous_valid | new_valid;
+
+        Some(RayIntersectionCandidate::new(
+            merged_t,
+            merged_payload,
+            merged_valid,
+        ))
+    }
+
+    // Calculate lighting for an intersection point
+    fn calculate_lighting<'a, V>(
+        object: &SphereData<V>,
+        intersection_point: V,
+        view_dir: V,
+        valid_mask: <<V as Vector>::Scalar as SimdValue>::SimdBool,
+        lights: impl IntoIterator<Item = &'a PointLight<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone,
+    ) -> ColorType<V::Scalar>
+    where
+        V: 'a + SimdRenderingVector,
+        V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>
+            + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+        <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar>,
+        ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool>,
+        SingleValueVectorScalar<V>: LightScalar + SubsetOf<V::Scalar>,
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector + NormalizableVector,
+    {
+        let zero = V::Scalar::zero();
+        let one = V::Scalar::one();
+
+        // Create ambient light
+        let ambient_light = AmbientLight::new(ColorType::new(one, one, one), zero);
+
+        // Calculate direct lighting from all point lights
+        let mut light_color = Srgb::<V::Scalar>::new(zero, zero, zero);
+        for light in lights.into_iter() {
+            let light = PointLight::<V>::splat(light);
+            let contribution =
+                light.calculate_contribution_at(object, intersection_point, view_dir);
+
+            light_color = light_color
+                + ColorType::blend(
+                    contribution.valid_mask,
+                    &(contribution.color * contribution.intensity),
+                    &Srgb::<V::Scalar>::new(zero, zero, zero),
+                );
         }
+
+        // Calculate ambient lighting
+        let ambient_contribution =
+            ambient_light.calculate_contribution_at(object, intersection_point, view_dir);
+
+        // Combine lighting and apply valid mask
+        ColorType::blend(
+            valid_mask,
+            &((ambient_contribution.color * ambient_contribution.intensity) + light_color),
+            &Srgb::<V::Scalar>::new(zero, zero, zero),
+        )
+    }
+
+    #[inline(always)]
+    // Separate function for antialiased raytracing
+    fn antialiased_raytrace<'a, V>(
+        coords: V,
+        unit_z: V,
+        spheres: impl IntoIterator<Item = &'a SphereData<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone
+        + Sync,
+        lights: impl IntoIterator<Item = &'a PointLight<<V as SimdCapableVector>::SingleValueVector>>
+        + Clone
+        + Sync,
+    ) -> Option<(
+        ColorType<V::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool,
+    )>
+    where
+        V: 'a + SimdRenderingVector,
+        V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>
+            + Splatable<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+        <<V as Vector>::Scalar as HasBoolMask>::Mask: LazySelect<<V as Vector>::Scalar>,
+        <<V as Vector>::Scalar as SimdValue>::Element: SubsetOf<<V as Vector>::Scalar> + Float,
+        <<V as Vector>::Scalar as SimdValue>::SimdBool: SimdValue<Element = bool> + Send + Sync,
+        <V as SimdCapableVector>::SingleValueVector: RenderingVector + NormalizableVector,
+        SingleValueVectorScalar<V>: LightScalar + SubsetOf<V::Scalar>,
+        ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        Standard: Distribution<<V as Vector>::Scalar>,
+    {
+        let samples_per_pixel = 32;
+        let scale = V::Scalar::from_subset(&(1.0 / samples_per_pixel as f32));
+
+        let zero = V::Scalar::zero();
+        let bool_false =
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false);
+
+        let initial_color = ColorType::new(zero, zero, zero);
+
+        // Sample multiple rays and average the results
+        let (res_color, valid_mask) = (0..samples_per_pixel)
+            .into_par_iter()
+            .filter_map(|_| {
+                Self::single_raytrace(
+                    coords + V::sample_random(),
+                    unit_z,
+                    spheres.clone(),
+                    lights.clone(),
+                )
+                .map(|(c, m)| (c * scale, m))
+            })
+            .reduce(
+                || (initial_color, bool_false),
+                |(res_color, res_mask), (color, mask)| (color + res_color, res_mask | mask),
+            );
+
+        Some((res_color, valid_mask))
     }
 
     fn render_pixel_colors<'a>(

@@ -19,7 +19,7 @@ use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue};
 use std::borrow::Cow;
 use std::fmt::Debug;
-use std::intrinsics::{likely, unlikely};
+use std::hint::{likely, unlikely};
 use std::marker::PhantomData;
 use std::ops::{Add, Mul, Neg, Sub};
 use std::sync::LazyLock;

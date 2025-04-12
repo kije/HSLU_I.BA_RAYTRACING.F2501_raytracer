@@ -1,7 +1,7 @@
 use crate::scalar::Scalar;
 use palette::bool_mask::HasBoolMask;
 use simba::simd::{SimdRealField, SimdValue};
-use std::ops::Sub;
+use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// A consolidated trait for scalar types used in lighting calculations
 ///
@@ -11,6 +11,8 @@ pub trait LightScalar:
     Scalar
     + SimdValue
     + SimdRealField
+    + num_traits::One
+    + num_traits::Zero
     + palette::num::Real
     + palette::num::Zero
     + palette::num::One
@@ -22,6 +24,10 @@ pub trait LightScalar:
     + HasBoolMask
     + palette::num::MinMax
     + Sub<Self, Output = Self>
+    + Add<Self, Output = Self>
+    + Mul<Self, Output = Self>
+    + Div<Self, Output = Self>
+    + Neg<Output = Self>
     + Copy
 {
 }
@@ -31,6 +37,8 @@ impl<T> LightScalar for T where
     T: Scalar
         + SimdValue
         + SimdRealField
+        + num_traits::One
+        + num_traits::Zero
         + palette::num::Real
         + palette::num::Zero
         + palette::num::One
@@ -41,7 +49,6 @@ impl<T> LightScalar for T where
         + palette::num::PartialCmp
         + HasBoolMask
         + palette::num::MinMax
-        + Sub<Self, Output = Self>
         + Copy
 {
 }

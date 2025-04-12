@@ -5,7 +5,7 @@ use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::izip;
 use palette::Darken;
-use std::intrinsics::{likely, unlikely};
+use std::hint::{likely, unlikely};
 use std::marker::PhantomData;
 use ultraviolet::{Vec3, Vec3x4, Vec3x8, f32x4, f32x8};
 use wide::CmpGt;

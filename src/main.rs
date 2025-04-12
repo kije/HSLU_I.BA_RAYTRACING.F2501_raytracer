@@ -1,6 +1,6 @@
 #![feature(generic_const_exprs)]
 #![feature(concat_idents)]
-#![feature(core_intrinsics)]
+#![feature(likely_unlikely)]
 #![allow(incomplete_features)]
 
 pub(crate) mod color;

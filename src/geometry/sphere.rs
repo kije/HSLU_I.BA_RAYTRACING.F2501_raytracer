@@ -1,16 +1,16 @@
 use crate::color::ColorSimdExt;
-use crate::color_traits::LightCompatibleColor;
 use crate::geometry::Ray;
 use crate::helpers::{ColorType, Splatable};
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scalar_traits::LightScalar;
 use crate::scene::Lightable;
-use crate::vector::{NormalizableVector, SimdCapableVector, VectorAware, VectorOperations};
+use crate::vector::{NormalizableVector, SimdCapableVector, VectorAware};
 use crate::vector_traits::{BaseVector, RenderingVector};
-use num_traits::{Float, NumOps, Zero};
+use num_traits::{Float, Zero};
 use palette::bool_mask::BoolMask;
 use simba::scalar::{SubsetOf, SupersetOf};
-use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdRealField, SimdValue};
+use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
+use std::hint::unlikely;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
 #[derive(Debug, Copy, Clone)]
@@ -97,7 +97,7 @@ impl<V> VectorAware<V> for SphereData<V> where V: BaseVector {}
 impl<V> Intersectable<V> for SphereData<V>
 where
     V: RenderingVector,
-    V::Scalar: Zero + LightScalar<SimdBool: SimdBool + BoolMask>,
+    V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>,
     <V::Scalar as SimdValue>::Element: Float + Copy,
 {
     type RayType = Ray<V>;
@@ -112,10 +112,9 @@ where
         let v = ray.origin - self.center;
 
         const A: f32 = 2.0; // 2 * (u dot u) => 2 * direction_mag_squared => 2 * 1 => 2
-        const A_INV: f32 = A.recip(); // crate::helpers::fast_inverse(A);
+        const A_INV: f32 = const { A.recip() }; // crate::helpers::fast_inverse(A);
         let a_splat_neg = V::Scalar::from_subset(&-A);
         let two_splat = V::Scalar::from_subset(&2.0);
-        let a_inv_splat = V::Scalar::from_subset(&A_INV);
         let zero = V::Scalar::zero();
         let invalid_value = Self::RayType::invalid_value_splatted();
 
@@ -127,13 +126,15 @@ where
         let discriminant_pos = discriminant.simd_ge(zero);
 
         // shortcircuit
-        if discriminant_pos.none() {
+        if unlikely(discriminant_pos.none()) {
             return RayIntersectionCandidate::new(
                 invalid_value,
                 payload,
                 <<V::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false),
             );
         }
+
+        let a_inv_splat = V::Scalar::from_subset(&A_INV);
 
         let discriminant_sqrt = discriminant.simd_sqrt();
 

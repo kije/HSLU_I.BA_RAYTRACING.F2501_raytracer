@@ -1,7 +1,6 @@
 use crate::scalar_traits::LightScalar;
 use crate::vector::{
-    VectorOperations, NormalizableVector, ReflectableVector,
-    SimdCapableVector, Vector,
+    NormalizableVector, ReflectableVector, SimdCapableVector, Vector, VectorOperations,
 };
 use palette::bool_mask::{HasBoolMask, LazySelect};
 use simba::scalar::SubsetOf;
@@ -17,6 +16,7 @@ pub(crate) trait BaseVector:
     + Mul<Self, Output = Self>
     + Copy
     + VectorOperations
+    + Sync
 {
 }
 
@@ -28,6 +28,7 @@ impl<V> BaseVector for V where
         + Mul<Self, Output = Self>
         + Copy
         + VectorOperations
+        + Sync
 {
 }
 

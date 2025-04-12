@@ -30,11 +30,13 @@ enum_dispatch = "0.3.13"
 assert_float_eq = "1.1"
 
 [features]
-default = []
+default = ["anti_aliasing"]
 simd_render = []
 simulate_slow_render = []
 render_timing_debug = ["incr_stats"]
+anti_aliasing = []
 high_resolution = []
+high_quality = ["anti_aliasing", "high_resolution"]
 
 [patch.crates-io]
 simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support"] }

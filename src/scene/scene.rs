@@ -2,7 +2,7 @@ use crate::geometry::{Ray, SphereData};
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
 use crate::scalar_traits::LightScalar;
 use crate::vector::VectorAware;
-use crate::vector_traits::{RenderingVector, BaseVector};
+use crate::vector_traits::{BaseVector, RenderingVector};
 use num_traits::{Float, NumOps};
 use palette::bool_mask::BoolMask;
 use simba::simd::{SimdBool, SimdValue};

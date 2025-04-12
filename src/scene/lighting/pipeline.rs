@@ -1,12 +1,14 @@
 use crate::helpers::{ColorType, Splatable};
-use crate::scene::lighting::light::SceneLightSourceVector;
+use crate::scalar_traits::LightScalar;
+
 use crate::scene::lighting::{Light, Lightable, SceneLightSource};
 use crate::scene::{AmbientLight, PointLight};
-use crate::vector::{VectorOperations, VectorOperationsSimdOperations, Vector};
+use crate::vector::{SimdCapableVector, Vector, VectorOperations};
+use crate::vector_traits::RenderingVector;
 use num_traits::Zero;
 use palette::{Darken, Mix, Srgb};
-use simba::scalar::SupersetOf;
-use simba::simd::SimdRealField;
+use simba::scalar::{SubsetOf, SupersetOf};
+use simba::simd::{SimdRealField, SimdValue};
 
 /// Pipeline for calculating lighting on objects
 #[derive(Debug, Clone, Copy)]
@@ -18,27 +20,20 @@ impl ShadingPipeline {
         lightable: &impl Lightable<Vector>,
         ambient: &impl Light<Vector>,
         lights: impl IntoIterator<
-            Item = &'a SceneLightSource<
-                <Vector as VectorOperationsSimdOperations>::SingleValueVector,
-            >,
+            Item = &'a SceneLightSource<<Vector as SimdCapableVector>::SingleValueVector>,
         > + Clone,
         position: Vector,
         ray_from_direction: Vector,
     ) -> ColorType<Vector::Scalar>
     where
-        Vector: 'a + SceneLightSourceVector,
-        Vector::Scalar: SimdRealField + Zero + Copy,
+        Vector: 'a + RenderingVector + SimdCapableVector,
+        Vector::Scalar: LightScalar,
+        <Vector::Scalar as SimdValue>::Element: SubsetOf<Vector::Scalar>,
+        <Vector as SimdCapableVector>::SingleValueVector: SimdCapableVector + RenderingVector,
+        <<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar: LightScalar,
+        <<<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar as SimdValue>::Element: SubsetOf<<<Vector as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar>,
         ColorType<Vector::Scalar>: Mix<Scalar = Vector::Scalar> + Darken<Scalar = Vector::Scalar>,
-        [(); <Vector as crate::vector::Vector>::DIMENSIONS]:, // <Vector as VectorOperationsSimdOperations>::SingleValueVector:
-                                                              //     VectorOperations
-                                                              //         + VectorOperationsSimdOperations
-                                                              //         + std::marker::Copy
-                                                              //         + Sub<
-                                                              //             <Vector as VectorOperationsSimdOperations>::SingleValueVector,
-                                                              //             Output = <Vector as VectorOperationsSimdOperations>::SingleValueVector,
-                                                              //         >,
-                                                              // <<Vector as VectorOperationsSimdOperations>::SingleValueVector as  crate::vector::Vector>::Scalar:
-                                                              //     std::marker::Copy + palette::num::Real + palette::num::Zero + palette::num::One + palette::num::Clamp,
+        [(); <Vector as crate::vector::Vector>::DIMENSIONS]:,
     {
         let zero = Vector::Scalar::zero();
 

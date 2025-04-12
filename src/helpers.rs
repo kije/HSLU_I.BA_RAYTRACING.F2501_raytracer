@@ -1,6 +1,4 @@
-use crate::scalar::Scalar;
 use palette::rgb::Srgb;
-use simba::scalar::{Field, RealField, SubsetOf, SupersetOf};
 use simba::simd::{
     SimdValue, WideBoolF32x4, WideBoolF32x8, WideBoolF64x4, WideF32x4, WideF32x8, WideF64x4,
 };

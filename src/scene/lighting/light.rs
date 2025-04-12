@@ -3,14 +3,13 @@ use crate::color_traits::LightCompatibleColor;
 use crate::helpers::{ColorType, Splatable};
 use crate::scalar_traits::LightScalar;
 use crate::scene::lighting::Lightable;
-use crate::vector::{SimdCapableVector, Vector, VectorAware, VectorOperations};
+use crate::vector::{SimdCapableVector, Vector, VectorAware};
 use crate::vector_traits::RenderingVector;
 use enum_dispatch::enum_dispatch;
 use num_traits::{One, Zero};
-use palette::blend::Premultiply;
 use palette::bool_mask::BoolMask;
 use simba::scalar::{SubsetOf, SupersetOf};
-use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
+use simba::simd::{SimdBool, SimdPartialOrd, SimdValue};
 
 #[derive(Debug, Copy, Clone)]
 pub(crate) struct LightContribution<S>

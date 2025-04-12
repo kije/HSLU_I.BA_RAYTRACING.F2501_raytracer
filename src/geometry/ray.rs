@@ -1,4 +1,4 @@
-use crate::vector::{NormalizableVector, SimdCapableVector, VectorAware, VectorOperations};
+use crate::vector::{NormalizableVector, VectorAware, VectorOperations};
 use num_traits::Float;
 use simba::simd::SimdValue;
 use std::fmt::Debug;
