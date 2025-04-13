@@ -19,7 +19,6 @@ pub(crate) mod vector;
 
 // New modules for trait simplification
 pub(crate) mod color_traits;
-pub(crate) mod macros;
 pub(crate) mod scalar_traits;
 pub(crate) mod simd_compat;
 pub(crate) mod vector_traits;
@@ -27,7 +26,7 @@ pub(crate) mod vector_traits;
 use crate::helpers::RenderTiming;
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputInteractive, WindowColorEncoder, WindowOutput};
-use crate::renderer::{Renderer, TestRenderer3DSW03CommonCode};
+use crate::renderer::{RaytracerRenderer, Renderer};
 use std::sync::Arc;
 use std::thread;
 
@@ -48,7 +47,7 @@ fn main() {
     let buffer_render = buffer.clone();
     thread::spawn(move || {
         let mut start = RenderTiming::default();
-        TestRenderer3DSW03CommonCode::<WindowColorEncoder>::default().render(&buffer_render);
+        RaytracerRenderer::<WindowColorEncoder>::default().render(&buffer_render);
         start.next();
         println!("Render timing done! {:?}", start);
     });
