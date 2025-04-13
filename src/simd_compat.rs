@@ -1,38 +1,129 @@
-use crate::helpers::ColorType;
+use crate::helpers::Splatable;
 use crate::scalar::Scalar;
-use simba::simd::SimdValue;
+use num_traits::{Float, FromPrimitive, Num, NumAssignOps, NumOps, One, Zero};
+use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect, Select};
+use simba::scalar::{SubsetOf, SupersetOf};
+use simba::simd::{SimdBool, SimdPartialOrd, SimdRealField, SimdSigned, SimdValue};
+use std::fmt::Debug;
+use std::ops::Neg;
 
-/// A trait for types that can be converted to and from SIMD representations
-pub trait SimdCompatible: Sized {
-    type SimdType;
-
-    fn to_simd(&self) -> Self::SimdType;
-    fn from_simd(simd: &Self::SimdType) -> Self;
+pub(crate) trait SimdValueBoolExt: SimdValue<SimdBool: SimdValue<Element = bool>> {
+    fn create_mask(mask: <Self::SimdBool as SimdValue>::Element) -> Self::SimdBool;
 }
 
-// Implementation for ColorType
-impl<S: Scalar + SimdValue> SimdCompatible for ColorType<S> {
-    type SimdType = ColorType<S>;
-
-    fn to_simd(&self) -> Self::SimdType {
-        self.clone()
-    }
-
-    fn from_simd(simd: &Self::SimdType) -> Self {
-        simd.clone()
-    }
-}
-
-/// Safely blend two values based on a mask
-pub fn blend_values<S: SimdValue>(mask: S::SimdBool, a: S, b: S) -> S {
-    a.select(mask, b)
-}
-
-/// Convert a scalar value to a SIMD-compatible wide type
-pub fn splat_to_wide<T, W>(scalar: T) -> W
+impl<T> SimdValueBoolExt for T
 where
-    T: Copy,
-    W: SimdValue<Element = T>,
+    T: SimdValue<SimdBool: SimdValue<Element = bool>>,
 {
-    W::splat(scalar)
+    fn create_mask(mask: <Self::SimdBool as SimdValue>::Element) -> Self::SimdBool {
+        <Self::SimdBool as SimdValue>::splat(mask)
+    }
+}
+
+pub(crate) trait SimdValueSimplified:
+    Scalar
+    + SubsetOf<Self>
+    + SupersetOf<<Self as SimdValue>::Element>
+    + Default
+    + HasBoolMask<Mask = <Self as SimdValue>::SimdBool>
+    + FromPrimitive
+    + SimdValue<
+        Element: SubsetOf<Self> + Copy + Send + Sync,
+        SimdBool: SimdValue<Element = bool, SimdBool = <Self as SimdValue>::SimdBool>
+                      + BoolMask
+                      + Debug
+                      + PartialEq
+                      + Default
+                      + SimdBool
+                      + Send
+                      + Sync
+                      + Select<Self>
+                      + LazySelect<Self>,
+    > + NumAssignOps<Self>
+    + NumOps<Self>
+    + Copy
+    + Zero
+    + One
+    + SimdValueBoolExt
+    + Num
+    + Send
+    + Sync
+    + SimdPartialOrd
+    + PartialEq
+    + Splatable<Self::Element>
+{
+}
+
+impl<V> SimdValueSimplified for V where
+    V: Scalar
+        + SubsetOf<Self>
+        + SupersetOf<<Self as SimdValue>::Element>
+        + Default
+        + HasBoolMask<Mask = <Self as SimdValue>::SimdBool>
+        + FromPrimitive
+        + SimdValue<
+            Element: SubsetOf<Self> + Copy + Send + Sync,
+            SimdBool: SimdValue<Element = bool, SimdBool = <Self as SimdValue>::SimdBool>
+                          + BoolMask
+                          + Debug
+                          + PartialEq
+                          + Default
+                          + SimdBool
+                          + Send
+                          + Sync
+                          + Select<Self>
+                          + LazySelect<Self>,
+        > + NumAssignOps<Self>
+        + NumOps<Self>
+        + Copy
+        + Zero
+        + One
+        + SimdValueBoolExt
+        + Send
+        + Sync
+        + Num
+        + SimdPartialOrd
+        + PartialEq
+        + Splatable<Self::Element>
+{
+}
+
+pub(crate) trait SimdValueSignedSimplified:
+    SimdValueSimplified + Neg<Output = Self> + SimdSigned
+{
+}
+
+impl<V> SimdValueSignedSimplified for V where
+    V: SimdValueSimplified + Neg<Output = Self> + SimdSigned
+{
+}
+
+pub(crate) trait SimdValueRealSimplified:
+    SimdValueSignedSimplified<Element: Float>
+    + SimdRealField
+    + palette::num::Real
+    + palette::num::Sqrt
+    + palette::num::Zero
+    + palette::num::One
+    + palette::num::Arithmetics
+    + palette::num::Clamp
+    + palette::num::Abs
+    + palette::num::PartialCmp
+    + palette::num::MinMax
+{
+}
+
+impl<V> SimdValueRealSimplified for V where
+    V: SimdValueSignedSimplified<Element: Float>
+        + SimdRealField
+        + palette::num::Real
+        + palette::num::Sqrt
+        + palette::num::Zero
+        + palette::num::One
+        + palette::num::Arithmetics
+        + palette::num::Clamp
+        + palette::num::Abs
+        + palette::num::PartialCmp
+        + palette::num::MinMax
+{
 }

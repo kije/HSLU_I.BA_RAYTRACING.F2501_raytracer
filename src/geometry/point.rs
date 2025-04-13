@@ -1,10 +1,9 @@
 use crate::geometry::Ray;
 use crate::helpers::Splatable;
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
-use crate::scalar_traits::LightScalar;
 use crate::vector::{SimdCapableVector, VectorAware};
-use crate::vector_traits::{BaseVector, RenderingVector};
-use simba::scalar::{SubsetOf, SupersetOf};
+use crate::vector_traits::{BaseVector, RenderingVector, SimdRenderingVector};
+use simba::scalar::SupersetOf;
 use simba::simd::{SimdPartialOrd, SimdValue};
 use std::ops::{Add, Neg, Sub};
 
@@ -28,8 +27,7 @@ where
 
 impl<V> PointData<V>
 where
-    V: RenderingVector + SimdCapableVector,
-    V::Scalar: LightScalar,
+    V: SimdRenderingVector,
 {
     pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
         Self {
@@ -40,12 +38,7 @@ where
 
 impl<V> Splatable<PointData<<V as SimdCapableVector>::SingleValueVector>> for PointData<V>
 where
-    V: RenderingVector + SimdCapableVector,
-    <V as SimdCapableVector>::SingleValueVector: BaseVector,
-    V::Scalar: LightScalar
-        + SupersetOf<<<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    <<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar:
-        SubsetOf<<V as crate::vector::Vector>::Scalar>,
+    V: SimdRenderingVector,
 {
     fn splat(v: &PointData<<V as SimdCapableVector>::SingleValueVector>) -> Self {
         Self {
@@ -56,7 +49,7 @@ where
 
 impl<V> VectorAware<V> for PointData<V> where V: BaseVector {}
 
-impl<V: BaseVector + Sub<V, Output = V>> Sub<V> for PointData<V> {
+impl<V: BaseVector> Sub<V> for PointData<V> {
     type Output = Self;
 
     fn sub(self, rhs: V) -> Self::Output {
@@ -64,7 +57,7 @@ impl<V: BaseVector + Sub<V, Output = V>> Sub<V> for PointData<V> {
     }
 }
 
-impl<V: BaseVector + Add<V, Output = V>> Add<V> for PointData<V> {
+impl<V: BaseVector> Add<V> for PointData<V> {
     type Output = Self;
 
     fn add(self, rhs: V) -> Self::Output {
@@ -75,7 +68,6 @@ impl<V: BaseVector + Add<V, Output = V>> Add<V> for PointData<V> {
 impl<V> Intersectable<V> for PointData<V>
 where
     V: RenderingVector,
-    V::Scalar: LightScalar,
 {
     type RayType = Ray<V>;
 
@@ -97,11 +89,14 @@ where
         RayIntersectionCandidate::new(t, payload, intersection_valid)
     }
 
-    fn intersect<'a>(
+    fn intersect<'a, P>(
         &'a self,
         ray: &'_ Self::RayType,
-        candidate: &'_ RayIntersectionCandidate<V::Scalar, &'a Self>,
-    ) -> Self::ReturnTypeWrapper<RayIntersection<V>> {
+        candidate: &'_ RayIntersectionCandidate<V::Scalar, &'a P>,
+    ) -> Self::ReturnTypeWrapper<RayIntersection<V>>
+    where
+        P: Intersectable<V>,
+    {
         let t = candidate.t;
         let valid_mask = candidate.valid_mask;
 

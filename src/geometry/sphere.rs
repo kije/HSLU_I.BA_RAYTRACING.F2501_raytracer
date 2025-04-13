@@ -2,11 +2,10 @@ use crate::color::ColorSimdExt;
 use crate::geometry::Ray;
 use crate::helpers::{ColorType, Splatable};
 use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
-use crate::scalar_traits::LightScalar;
 use crate::scene::Lightable;
 use crate::vector::{NormalizableVector, SimdCapableVector, VectorAware};
-use crate::vector_traits::{BaseVector, RenderingVector};
-use num_traits::{Float, Zero};
+use crate::vector_traits::{BaseVector, RenderingVector, SimdRenderingVector};
+use num_traits::Zero;
 use palette::bool_mask::BoolMask;
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdBool, SimdComplexField, SimdPartialOrd, SimdValue};
@@ -53,8 +52,7 @@ where
 
 impl<V> SphereData<V>
 where
-    V: RenderingVector + SimdCapableVector,
-    V::Scalar: LightScalar,
+    V: SimdRenderingVector,
 {
     pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self
     where
@@ -72,15 +70,7 @@ where
 
 impl<V> Splatable<SphereData<<V as SimdCapableVector>::SingleValueVector>> for SphereData<V>
 where
-    V: RenderingVector + SimdCapableVector,
-    <V as SimdCapableVector>::SingleValueVector: BaseVector,
-    V::Scalar: LightScalar
-        + SupersetOf<<<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar>
-        + Splatable<<<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar>,
-    <<V as SimdCapableVector>::SingleValueVector as crate::vector::Vector>::Scalar:
-        SubsetOf<<V as crate::vector::Vector>::Scalar>,
-    <<V as crate::vector::Vector>::Scalar as SimdValue>::Element:
-        SubsetOf<<V as crate::vector::Vector>::Scalar>,
+    V: SimdRenderingVector,
 {
     fn splat(v: &SphereData<<V as SimdCapableVector>::SingleValueVector>) -> Self {
         Self {
@@ -97,8 +87,6 @@ impl<V> VectorAware<V> for SphereData<V> where V: BaseVector {}
 impl<V> Intersectable<V> for SphereData<V>
 where
     V: RenderingVector,
-    V::Scalar: LightScalar<SimdBool: SimdBool + BoolMask>,
-    <V::Scalar as SimdValue>::Element: Float + Copy,
 {
     type RayType = Ray<V>;
     type ReturnTypeWrapper<T> = T;
@@ -167,11 +155,14 @@ where
         RayIntersectionCandidate::new(final_t, payload, final_t_valid)
     }
 
-    fn intersect<'a>(
+    fn intersect<'a, P>(
         &'a self,
         ray: &'_ Self::RayType,
-        candidate: &'_ RayIntersectionCandidate<V::Scalar, &'a Self>,
-    ) -> Self::ReturnTypeWrapper<RayIntersection<V>> {
+        candidate: &'_ RayIntersectionCandidate<V::Scalar, &'a P>,
+    ) -> Self::ReturnTypeWrapper<RayIntersection<V>>
+    where
+        P: Intersectable<V>,
+    {
         let t = candidate.t;
         let valid_mask = candidate.valid_mask;
 
@@ -192,7 +183,7 @@ where
     }
 }
 
-impl<V: BaseVector + Sub<V, Output = V>> Sub<V> for SphereData<V> {
+impl<V: BaseVector> Sub<V> for SphereData<V> {
     type Output = Self;
 
     fn sub(self, rhs: V) -> Self::Output {
@@ -205,7 +196,7 @@ impl<V: BaseVector + Sub<V, Output = V>> Sub<V> for SphereData<V> {
     }
 }
 
-impl<V: BaseVector + Add<V, Output = V>> Add<V> for SphereData<V> {
+impl<V: BaseVector> Add<V> for SphereData<V> {
     type Output = Self;
 
     fn add(self, rhs: V) -> Self::Output {
@@ -221,7 +212,6 @@ impl<V: BaseVector + Add<V, Output = V>> Add<V> for SphereData<V> {
 impl<V> Lightable<V> for SphereData<V>
 where
     V: RenderingVector,
-    V::Scalar: LightScalar,
 {
     fn get_material_color_at(&self, _: V) -> ColorType<V::Scalar> {
         self.color.clone()

@@ -1,3 +1,4 @@
+use crate::simd_compat::SimdValueBoolExt;
 use crate::vector::{NormalizableVector, VectorAware, VectorOperations};
 use num_traits::Float;
 use simba::simd::SimdValue;
@@ -23,9 +24,8 @@ where
     where
         Vector: NormalizableVector,
         [(); <Vector as crate::vector::Vector>::LANES]:,
-        <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool: From<bool>,
     {
-        Self::new_with_mask(origin, direction, true.into())
+        Self::new_with_mask(origin, direction, Vector::Scalar::create_mask(true))
     }
 
     #[inline]

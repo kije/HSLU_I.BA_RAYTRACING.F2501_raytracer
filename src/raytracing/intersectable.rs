@@ -23,11 +23,13 @@ where
 
     // FIXME: we might want to move that to the RayIntersectionCandidate type, as you normaly would call this anyyway by candidate.payload.intersect(ray, candidate)?
     // or we want to have a shortcut from RayIntersectionCandidate
-    fn intersect<'a>(
+    fn intersect<'a, P>(
         &'a self,
         ray: &'_ Self::RayType,
-        candidate: &'_ RayIntersectionCandidate<Vector::Scalar, &'a Self>,
-    ) -> Self::ReturnTypeWrapper<RayIntersection<Vector>>;
+        candidate: &'_ RayIntersectionCandidate<Vector::Scalar, &'a P>,
+    ) -> Self::ReturnTypeWrapper<RayIntersection<Vector>>
+    where
+        P: Intersectable<Vector>; // fixme: bound really needed? Maybe just VectorAware<Vector> bound to ensure object operate on same laned and dimensioned vectors?
 }
 
 #[derive(Clone, Debug, Copy)]

@@ -1,6 +1,10 @@
-use crate::scalar::Scalar;
+use crate::helpers::Splatable;
+use crate::scalar::{CheckScalarLanesMatch, Scalar};
+use crate::simd_compat::SimdValueSimplified;
+use simba::scalar::SupersetOf;
 use simba::simd::{SimdValue, WideF32x4, WideF32x8};
 use std::fmt::Debug;
+use std::ops::Deref;
 use ultraviolet::{
     Bivec2, Bivec2x4, Bivec2x8, Bivec3, Bivec3x4, Bivec3x8, IVec2, IVec3, IVec4, Rotor2, Rotor2x4,
     Rotor2x8, Rotor3, Rotor3x4, Rotor3x8, UVec2, UVec3, UVec4, Vec2, Vec2x4, Vec2x8, Vec3, Vec3x4,
@@ -11,11 +15,8 @@ use wide::{f32x4, f32x8};
 /// The basic scalar type
 ///
 /// This does not make any assumption on the algebraic properties of `Self`.
-pub trait Vector: Clone + PartialEq + Debug
-where
-    <Self::Scalar as SimdValue>::SimdBool: Debug,
-{
-    type Scalar: Scalar + SimdValue;
+pub trait Vector: Clone + PartialEq + Debug {
+    type Scalar: SimdValueSimplified;
     type InnerScalar: Scalar;
 
     const LANES: usize = Self::Scalar::LANES;
@@ -87,7 +88,12 @@ pub trait ReflectableVector: Vector {
     fn reflected(&self, normal: Self) -> Self;
 }
 
-pub trait SimdCapableVector: Vector {
+pub trait SimdCapableVector:
+    Vector<
+    Scalar: SupersetOf<<<Self as SimdCapableVector>::SingleValueVector as Vector>::Scalar>
+                + Splatable<<<Self as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
+>
+{
     type SingleValueVector: Vector;
     /// Blend two vectors together lanewise using `mask` as a mask.
     ///
@@ -98,6 +104,9 @@ pub trait SimdCapableVector: Vector {
 
     fn splat(vec: Self::SingleValueVector) -> Self;
 }
+
+pub type SingleValueVectorScalar<V> =
+    <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar;
 
 pub trait RotatableVector: VectorAssociations {
     fn rotate_by(&mut self, rotor: Self::Rotor);
@@ -113,7 +122,7 @@ pub(crate) trait CheckVectorDimensionsMatch<const REQUIRED_DIMENSIONS: usize>:
 impl<const REQUIRED_DIMENSIONS: usize, T: Vector + ?Sized>
     CheckVectorDimensionsMatch<REQUIRED_DIMENSIONS> for T
 {
-    const CHECK: () = [()][(Self::DIMENSIONS == REQUIRED_DIMENSIONS) as usize];
+    const CHECK: () = [()][(Self::DIMENSIONS != REQUIRED_DIMENSIONS) as usize];
 }
 
 #[inline(always)]
@@ -160,7 +169,7 @@ macro_rules! impl_vector {
               fn splat(vec: Self::SingleValueVector) -> Self {
                 $(
                     let $component = {
-                        let splatted_comp = Self::Scalar::splat(vec.$component);
+                        let splatted_comp = <Self::Scalar as crate::helpers::Splatable<_>>::splat(&vec.$component);
                         *unsafe { cast_simd_value::<Self::Scalar, Self::InnerScalar>(&splatted_comp) }
                     };
                 )+
@@ -193,7 +202,7 @@ macro_rules! impl_vector {
               fn splat(vec: Self::SingleValueVector) -> Self {
                 $(
                     let $component = {
-                        let splatted_comp = Self::Scalar::splat(vec.$component);
+                        let splatted_comp = <Self::Scalar as crate::helpers::Splatable<_>>::splat(&vec.$component);
                         *unsafe { cast_simd_value::<Self::Scalar, Self::InnerScalar>(&splatted_comp) }
                     };
                 )+

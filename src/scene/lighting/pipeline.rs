@@ -26,7 +26,7 @@ impl ShadingPipeline {
         ray_from_direction: Vector,
     ) -> ColorType<Vector::Scalar>
     where
-        Vector: 'a + RenderingVector + SimdCapableVector,
+        Vector: 'a + SimdRenderingVector,
         Vector::Scalar: LightScalar,
         <Vector::Scalar as SimdValue>::Element: SubsetOf<Vector::Scalar>,
         <Vector as SimdCapableVector>::SingleValueVector: SimdCapableVector + RenderingVector,
