@@ -414,3 +414,169 @@ where
 
 // impl vector-aware trait for the vectors itslef
 impl<Vector> VectorAware<Vector> for Vector where Vector: self::Vector {}
+
+/// A vector that carris with it a validity mask and a tag value (e.g. a 4/8-lane simd integer that stores eg the index of the scene object it belongs to or so) so that we can run vectorized stuff through the raytracer and keep track of which object it belongs to, even when say lan1 belongs to a sphere object and lane 3 to a triangle
+#[derive(Debug, Clone, PartialEq, Default)]
+struct TaggedSimdVector<V, Tag>
+where
+    V: Vector,
+    Tag: SimdValue + CheckScalarLanesMatch<{ V::LANES }>,
+    <V::Scalar as SimdValue>::SimdBool: Debug + PartialEq + Default,
+{
+    vector: V,
+    valid_mask: <V::Scalar as SimdValue>::SimdBool,
+    tag: Tag,
+}
+
+impl<V, Tag> Deref for TaggedSimdVector<V, Tag>
+where
+    V: Vector,
+    Tag: SimdValue + CheckScalarLanesMatch<{ V::LANES }>,
+{
+    type Target = V;
+    fn deref(&self) -> &Self::Target {
+        &self.vector
+    }
+}
+
+impl<V, Tag> Vector for TaggedSimdVector<V, Tag>
+where
+    Self: Clone + PartialEq + Debug,
+    V: Vector,
+    Tag: SimdValue + CheckScalarLanesMatch<{ V::LANES }>,
+{
+    type Scalar = V::Scalar;
+    type InnerScalar = V::InnerScalar;
+    const DIMENSIONS: usize = V::DIMENSIONS;
+}
+
+//
+// impl<V, Tag>  VectorOperations for TaggedSimdVector<V, Tag> where
+//     Self: Clone + PartialEq + Debug,
+//     V: Vector + VectorOperations + Default + SimdCapableVector,
+//     Tag: SimdValue + SimdPartialOrd+ CheckScalarLanesMatch<{ V::LANES }> + Default, {
+//     #[inline(always)]
+//     fn broadcast(val: Self::Scalar) -> Self {
+//         Self {
+//             vector: V::broadcast(val),
+//             valid_mask: <V::Scalar as SimdValue>::SimdBool::from_subset(&true),
+//             ..Default::default()
+//         }
+//     }
+//
+//     #[inline(always)]
+//     fn dot(&self, other: Self) -> Self::Scalar {
+//         V::dot(&self.vector, other.vector)
+//     }
+//
+//     #[inline(always)]
+//     fn mag_sq(&self) -> Self::Scalar {
+//         V::mag_sq(&self.vector)
+//     }
+//
+//     #[inline(always)]
+//     fn mag(&self) -> Self::Scalar {
+//         V::mag(&self.vector)
+//     }
+//
+//
+//     #[inline(always)]
+//     fn mul_add(&self, mul: Self, add: Self) -> Self {
+//         let valid_mask = self.valid_mask & mul.valid_mask & add.valid_mask;
+//         let same_mask = self.tag.simd_eq( mul.tag) & (&self.tag).simd_eq( add.tag);
+//         Self {
+//             vector: V::mul_add(&self.vector, mul.vector, add.vector),
+//             valid_mask: valid_mask & same_mask,
+//             tag: self.tag
+//         }
+//     }
+//
+//     #[inline(always)]
+//     fn abs(&self) -> Self {
+//         Self {
+//             vector: V::abs(&self.vector),
+//             ..self
+//         }
+//     }
+//
+//     #[inline(always)]
+//     fn clamp(&mut self, min: Self, max: Self) {
+//         V::clamp(&mut self.vector, min.vector, max.vector);
+//     }
+//
+//     #[inline(always)]
+//     fn map<F>(&self, mut f: F) -> Self where F: FnMut(Self::Scalar) -> Self::Scalar {
+//         Self {
+//             vector: V::map(&self.vector, f),
+//             ..self
+//         }
+//     }
+//
+// #[inline(always)]
+// fn apply<F>(&mut self, mut f: F) where F: FnMut(Self::Scalar ) -> Self::Scalar {
+//     $vec::apply(self, |s|{
+//         let val =  *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&s) };
+//
+//         let result = f(val);
+//
+//         *unsafe { cast_simd_value::<$scalar_type, $inner_scalar>(&result) }
+//     });
+// }
+//
+// #[inline(always)]
+// fn max_by_component(self, other: Self) -> Self {
+//     $vec::max_by_component(self, other)
+// }
+//
+// #[inline(always)]
+// fn min_by_component(self, other: Self) -> Self {
+//     $vec::min_by_component(self, other)
+// }
+//
+// #[inline(always)]
+// fn component_max(&self) -> Self::Scalar {
+//     let max = $vec::component_max(self);
+//     *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&max) }
+// }
+//
+// #[inline(always)]
+// fn component_min(&self) -> Self::Scalar {
+//     let min = $vec::component_min(self);
+//     *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&min) }
+// }
+//
+// #[inline(always)]
+// fn zero() -> Self {
+//     Self::zero()
+// }
+//
+// #[inline(always)]
+// fn one() -> Self {
+//     Self::one()
+// }
+//
+// fn sample_random() -> Self where rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar> {
+//     use rand::Rng;
+//     let mut rng = crate::random::pseudo_rng();
+//     let random = rng.r#gen::<[$scalar_type; $dims]>();
+//     let casted_random = (*unsafe { cast_simd_value::<[$scalar_type;$dims],[$inner_scalar;$dims]>(&random) });
+//     casted_random.into()
+// }
+// }
+
+#[test]
+fn d() {
+    let x = TaggedSimdVector {
+        vector: Vec3::new(0.0, 0.2, 0.1),
+        valid_mask: true,
+        tag: 0.0f32,
+    };
+    println!("{:#?}", <Vec3 as Vector>::LANES);
+    println!("{:#?}", <WideF32x4 as SimdValue>::LANES);
+
+    let x = WideF64x4::default();
+    // println!(
+    //     "{:#?}",
+    //     <WideF32x4 as CheckScalarLanesMatch<{ <Vec3 as Vector>::LANES }>>::CHECK
+    // );
+}
