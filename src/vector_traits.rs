@@ -1,8 +1,10 @@
+use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
 use crate::scalar_traits::LightScalar;
 use crate::vector::{
-    NormalizableVector, ReflectableVector, SimdCapableVector, Vector, VectorOperations,
+    NormalizableVector, ReflectableVector, SimdCapableVector, Vector, Vector3DAccessor,
+    Vector3DOperations, VectorAssociations, VectorOperations,
 };
-use std::ops::{Add, Mul, Sub};
+use std::ops::{Add, Mul, Neg, Sub};
 
 /// A basic vector trait combining common vector operations
 pub(crate) trait BaseVector:
@@ -30,13 +32,25 @@ impl<V> BaseVector for V where
 
 /// A trait for vectors with common operations for rendering
 pub(crate) trait RenderingVector:
-    BaseVector<Scalar: LightScalar> + NormalizableVector + ReflectableVector
+    BaseVector<Scalar: LightScalar>
+    + NormalizableVector
+    + ReflectableVector
+    + Vector3DOperations
+    + Neg<Output = Self>
+    + Vector3DAccessor
+    + VectorAssociations<Matrix: MatrixFixedDimensions<3> + MatrixOperations>
 {
 }
 
 // Blanket implementation
 impl<V> RenderingVector for V where
-    V: BaseVector<Scalar: LightScalar> + NormalizableVector + ReflectableVector
+    V: BaseVector<Scalar: LightScalar>
+        + NormalizableVector
+        + ReflectableVector
+        + Vector3DOperations
+        + Neg<Output = V>
+        + Vector3DAccessor
+        + VectorAssociations<Matrix: MatrixFixedDimensions<3> + MatrixOperations>
 {
 }
 

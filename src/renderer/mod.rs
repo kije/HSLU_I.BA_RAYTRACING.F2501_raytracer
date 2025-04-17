@@ -14,15 +14,9 @@ use std::time::Instant;
 use std::{mem, thread};
 
 mod raytracer_renderer;
-mod test_renderer;
-mod test_renderer_3d_sphere_sw02;
-mod test_renderer_light_color_sw03;
-mod test_renderer_sw03_common_code;
-mod test_renderer_vector;
 
 use crate::output::OutputColorEncoder;
 pub(crate) use raytracer_renderer::RaytracerRenderer;
-pub(crate) use test_renderer_sw03_common_code::TestRenderer3DSW03CommonCode;
 
 pub(crate) struct RenderCoordinates {
     x: usize,

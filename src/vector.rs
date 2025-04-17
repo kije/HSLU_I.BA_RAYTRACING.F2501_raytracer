@@ -1,14 +1,17 @@
 use crate::helpers::Splatable;
-use crate::scalar::{CheckScalarLanesMatch, Scalar};
+use crate::matrix::Matrix;
+use crate::scalar::Scalar;
 use crate::simd_compat::SimdValueSimplified;
 use simba::scalar::SupersetOf;
 use simba::simd::{SimdValue, WideF32x4, WideF32x8};
 use std::fmt::Debug;
-use std::ops::Deref;
+use std::ops::{Add, Deref, Mul};
+use tt_call::tt_if;
+use tt_equal::tt_equal;
 use ultraviolet::{
-    Bivec2, Bivec2x4, Bivec2x8, Bivec3, Bivec3x4, Bivec3x8, IVec2, IVec3, IVec4, Rotor2, Rotor2x4,
-    Rotor2x8, Rotor3, Rotor3x4, Rotor3x8, UVec2, UVec3, UVec4, Vec2, Vec2x4, Vec2x8, Vec3, Vec3x4,
-    Vec3x8, Vec4, Vec4x4, Vec4x8, m32x4, m32x8,
+    Bivec2, Bivec2x4, Bivec2x8, Bivec3, Bivec3x4, Bivec3x8, IVec2, IVec3, IVec4, Mat2, Mat2x4,
+    Mat2x8, Mat3, Mat3x4, Mat3x8, Rotor2, Rotor2x4, Rotor2x8, Rotor3, Rotor3x4, Rotor3x8, UVec2,
+    UVec3, UVec4, Vec2, Vec2x4, Vec2x8, Vec3, Vec3x4, Vec3x8, Vec4, Vec4x4, Vec4x8, m32x4, m32x8,
 };
 use wide::{f32x4, f32x8};
 
@@ -26,6 +29,8 @@ pub trait Vector: Clone + PartialEq + Debug {
 pub trait VectorAssociations: Vector {
     type Bivec;
     type Rotor;
+
+    type Matrix: Matrix<Vector = Self>;
 }
 
 pub trait VectorOperations: Vector {
@@ -70,6 +75,28 @@ pub trait VectorOperations: Vector {
     where
         rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar>;
 }
+
+pub trait Vector3DOperations: VectorAssociations {
+    fn cross(&self, other: Self) -> Self;
+    fn wedge(&self, other: Self) -> Self::Bivec;
+    fn geom(&self, other: Self) -> Self::Rotor;
+}
+
+pub trait VectorAccessorX: Vector {
+    fn x(&self) -> Self::Scalar;
+}
+
+pub trait VectorAccessorY: Vector {
+    fn y(&self) -> Self::Scalar;
+}
+
+pub trait VectorAccessorZ: Vector {
+    fn z(&self) -> Self::Scalar;
+}
+
+pub trait Vector3DAccessor: VectorAccessorX + VectorAccessorY + VectorAccessorZ {}
+
+impl<T> Vector3DAccessor for T where T: VectorAccessorX + VectorAccessorY + VectorAccessorZ {}
 
 pub trait NormalizableVector: Vector {
     fn normalize(&mut self);
@@ -154,8 +181,23 @@ mod test_cast_simd_value {
     }
 }
 
+macro_rules! if_three {
+    ($n: literal => $($tts:tt)*) => {
+        tt_if!{
+            condition = [{tt_equal}]
+            input = [{ $n 3 }]         // The two identifiers are here passed to 'tt_equal'
+            true = [{
+                $($tts)*
+            }]
+            false = [{
+
+            }]
+        }
+    };
+}
+
 macro_rules! impl_vector {
-    (SIMD_OPS[$low_vec:ty, $mask_wide_type:ty, ($($component:ident),+)] ;; $vec:ident) => {
+    (SIMD_OPS[$low_vec:ty, $mask_wide_type:ty$(,)?] ;; $vec:ident ;; ($($component:ident),+)) => {
           impl crate::vector::SimdCapableVector for $vec {
             type SingleValueVector = $low_vec;
 
@@ -179,11 +221,11 @@ macro_rules! impl_vector {
             }
         }
     };
-    (MANUAL_SIMD_OPS[$low_vec:ty, $mask_wide_type:ty, ($($component:ident),+)] ;; $vec:ident) => {
+    (MANUAL_SIMD_OPS[$low_vec:ty, $mask_wide_type:ty$(,)?] ;; $vec:ident ;; ($($component:ident),+)) => {
           impl crate::vector::SimdCapableVector for $vec {
             type SingleValueVector = $low_vec;
 
-             #[inline(always)]
+            #[inline(always)]
             fn blend(mask: <Self::Scalar as SimdValue>::SimdBool, tru: Self, fals: Self) -> Self {
                 $(
                 let $component = {
@@ -212,7 +254,7 @@ macro_rules! impl_vector {
             }
         }
     };
-    (REFLECTABLE ;; $vec:ident) => {
+    (REFLECTABLE ;; $vec:ident ;; ($($component:ident),+)) => {
          impl crate::vector::ReflectableVector for $vec {
             #[inline(always)]
             fn reflect(&mut self, normal: Self){
@@ -225,7 +267,7 @@ macro_rules! impl_vector {
             }
         }
     };
-    (FLOAT ;; $vec:ident) => {
+    (FLOAT ;; $vec:ident ;; ($($component:ident),+)) => {
           impl crate::vector::NormalizableVector for $vec {
             #[inline(always)]
             fn normalize(&mut self) {
@@ -234,17 +276,29 @@ macro_rules! impl_vector {
         }
     };
 
-    ($([$($vec:ident ( $scalar_type:ty = $inner_scalar:ty | $lanes: expr ) $(=>   $rotor_type:ty | $bivec_type:ty )? $({ $(($special_attr: tt $([$($special_attr_args: tt),+])?)),+})?  ),+] => $dims:expr),+) => {
+    ($([$($vec:ident ( $scalar_type:ty = $inner_scalar:ty | $lanes: literal ) $(=>   $rotor_type:ty | $bivec_type:ty | $matrix_type:ty )? $({ $(($special_attr: tt $([$($special_attr_args: tt),+])?)),+})?  ),+] => [$dims:literal := $components:tt]),+) => {
         $(
             $(
-                impl_vector!($vec, $scalar_type, $inner_scalar, $lanes, $dims $(, $bivec_type, $rotor_type)?);
+                impl_vector!($vec, $scalar_type, $inner_scalar, $lanes, $dims, $components $(, $bivec_type, $rotor_type, $matrix_type)?);
                 $(
-                    $(impl_vector!($special_attr $([$($special_attr_args),+])? ;; $vec);)*
+                    $(impl_vector!($special_attr $([$($special_attr_args),+])? ;; $vec ;; $components);)*
                 )?
             )+
         )+
     };
-    ($vec:ident , $scalar_type:ty, $inner_scalar:ty, $lanes: expr, $dims:expr $(, $bivec_type:ty, $rotor_type:ty )?) => {
+    (@cast_simd_value $scalar_type:ty, $inner_scalar:ty, $var:ident) => {
+        tt_if!{
+            condition = [{tt_equal}]
+            input = [{ $scalar_type $inner_scalar }]
+            true = [{
+                $var
+            }]
+            false = [{
+                *unsafe { cast_simd_value::<$scalar_type, $inner_scalar>(&$var) }
+            }]
+        }
+    };
+    ($vec:ident , $scalar_type:ty, $inner_scalar:ty, $lanes: literal, $dims:literal, ($($component:ident),+) $(, $bivec_type:ty, $rotor_type:ty, $matrix_type:ty )?) => {
         impl crate::vector::Vector for $vec {
             type Scalar = $scalar_type;
             type InnerScalar = $inner_scalar;
@@ -257,7 +311,7 @@ macro_rules! impl_vector {
             #[inline(always)]
             fn broadcast(val: Self::Scalar) -> Self {
                 Self::broadcast(
-                    *unsafe { cast_simd_value::<$scalar_type, $inner_scalar>(&val) }
+                    impl_vector!(@cast_simd_value $scalar_type, $inner_scalar, val)
                 )
             }
 
@@ -268,19 +322,21 @@ macro_rules! impl_vector {
                     other
                 );
 
-                *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&dot) }
+                impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, dot)
             }
 
             #[inline(always)]
              fn mag_sq(&self) -> Self::Scalar {
                 let mag_sq = $vec::mag_sq(self);
-                *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&mag_sq) }
+
+                impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, mag_sq)
             }
 
             #[inline(always)]
             fn mag(&self) -> Self::Scalar {
                 let mag = $vec::mag(self);
-                *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&mag) }
+
+                impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, mag)
             }
 
 
@@ -302,22 +358,22 @@ macro_rules! impl_vector {
             #[inline(always)]
             fn map<F>(&self, mut f: F) -> Self where F: FnMut(Self::Scalar) -> Self::Scalar {
                 $vec::map(self, |s|{
-                    let val =  *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&s) };
+                    let val =  impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, s);
 
                     let result = f(val);
 
-                    *unsafe { cast_simd_value::<$scalar_type, $inner_scalar>(&result) }
+                    impl_vector!(@cast_simd_value $scalar_type,  $inner_scalar, result)
                 })
             }
 
             #[inline(always)]
              fn apply<F>(&mut self, mut f: F) where F: FnMut(Self::Scalar ) -> Self::Scalar {
                 $vec::apply(self, |s|{
-                    let val =  *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&s) };
+                    let val =  impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, s);
 
                     let result = f(val);
 
-                    *unsafe { cast_simd_value::<$scalar_type, $inner_scalar>(&result) }
+                    impl_vector!(@cast_simd_value $scalar_type,  $inner_scalar, result)
                 });
             }
 
@@ -334,13 +390,13 @@ macro_rules! impl_vector {
             #[inline(always)]
             fn component_max(&self) -> Self::Scalar {
                 let max = $vec::component_max(self);
-                *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&max) }
+                impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, max)
             }
 
             #[inline(always)]
             fn component_min(&self) -> Self::Scalar {
                 let min = $vec::component_min(self);
-                *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&min) }
+                impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, min)
             }
 
             #[inline(always)]
@@ -357,7 +413,7 @@ macro_rules! impl_vector {
                 use rand::Rng;
                 let mut rng = crate::random::pseudo_rng();
                 let random = rng.r#gen::<[$scalar_type; $dims]>();
-                let casted_random = (*unsafe { cast_simd_value::<[$scalar_type;$dims],[$inner_scalar;$dims]>(&random) });
+                let casted_random = impl_vector!(@cast_simd_value [$scalar_type;$dims], [$inner_scalar;$dims], random);
                 casted_random.into()
             }
         }
@@ -370,9 +426,63 @@ macro_rules! impl_vector {
         }
 
         $(
+            tt_if!{
+                condition = [{tt_equal}]
+                input = [{ $component x }]
+                true = [{
+                    impl crate::vector::VectorAccessorX for $vec {
+                        #[inline(always)]
+                        fn x(&self) -> Self::Scalar {
+                            let x = self.x;
+                            impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, x)
+                        }
+                    }
+                }]
+                false = [{
+
+                }]
+            }
+
+            tt_if!{
+                condition = [{tt_equal}]
+                input = [{ $component y }]
+                true = [{
+                    impl crate::vector::VectorAccessorY for $vec {
+                        #[inline(always)]
+                        fn y(&self) -> Self::Scalar {
+                            let y = self.y;
+                            impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, y)
+                        }
+                    }
+                }]
+                false = [{
+
+                }]
+            }
+
+            tt_if!{
+                condition = [{tt_equal}]
+                input = [{ $component z }]
+                true = [{
+                    impl crate::vector::VectorAccessorZ for $vec {
+                        #[inline(always)]
+                        fn z(&self) -> Self::Scalar {
+                            let z = self.z;
+                            impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, z)
+                        }
+                    }
+                }]
+                false = [{
+
+                }]
+            }
+        )*
+
+        $(
             impl crate::vector::VectorAssociations for $vec {
                 type Bivec = $bivec_type;
                 type Rotor = $rotor_type;
+                type Matrix = $matrix_type;
             }
 
             impl crate::vector::RotatableVector for $vec {
@@ -383,26 +493,49 @@ macro_rules! impl_vector {
                    $vec::rotated_by(self, rotor)
                }
             }
+
+            if_three!($dims =>
+                impl crate::vector::Vector3DOperations for $vec {
+                    fn cross(&self, other: Self) -> Self {
+                         $vec::cross(
+                            self,
+                            other
+                        )
+                    }
+                    fn wedge(&self, other: Self) -> Self::Bivec {
+                         $vec::wedge(
+                            self,
+                            other
+                        )
+                    }
+                    fn geom(&self, other: Self) -> Self::Rotor {
+                        $vec::geom(
+                            self,
+                            other
+                        )
+                    }
+                }
+            );
         )?
     };
 }
 
 impl_vector!(
     [
-        Vec2 (f32 = f32 | 1) => Rotor2|Bivec2 {(FLOAT), (MANUAL_SIMD_OPS[Vec2, bool, (x,y)])}, IVec2 ( i32 = i32 | 1), UVec2 ( u32 = u32 | 1),
-        Vec2x4 (WideF32x4 = f32x4 | 4) => Rotor2x4|Bivec2x4 {(FLOAT), (SIMD_OPS[Vec2, m32x4, (x,y)])},
-        Vec2x8 (WideF32x8 = f32x8 | 8) => Rotor2x8|Bivec2x8 {(FLOAT), (SIMD_OPS[Vec2, m32x8, (x,y)])}
-    ] => 2,
+        Vec2 (f32 = f32 | 1) => Rotor2|Bivec2|Mat2 {(FLOAT), (MANUAL_SIMD_OPS[Vec2, bool])}, IVec2 ( i32 = i32 | 1), UVec2 ( u32 = u32 | 1),
+        Vec2x4 (WideF32x4 = f32x4 | 4) => Rotor2x4|Bivec2x4|Mat2x4 {(FLOAT), (SIMD_OPS[Vec2, m32x4])},
+        Vec2x8 (WideF32x8 = f32x8 | 8) => Rotor2x8|Bivec2x8|Mat2x8 {(FLOAT), (SIMD_OPS[Vec2, m32x8])}
+    ] => [2 := (x,y)],
     [
-        Vec3 (f32 = f32 | 1) => Rotor3|Bivec3 {(REFLECTABLE), (FLOAT), (MANUAL_SIMD_OPS[Vec3, bool, (x,y,z)])}, IVec3 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec3 ( u32 = u32 | 1),
-        Vec3x4 (WideF32x4 = f32x4 | 4) => Rotor3x4|Bivec3x4 {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec3, m32x4, (x,y,z)])},
-        Vec3x8 (WideF32x8 = f32x8 | 8) => Rotor3x8|Bivec3x8 {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec3, m32x8, (x,y,z)])}
-    ] => 3,
+        Vec3 (f32 = f32 | 1) => Rotor3|Bivec3|Mat3 {(REFLECTABLE), (FLOAT), (MANUAL_SIMD_OPS[Vec3, bool])}, IVec3 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec3 ( u32 = u32 | 1),
+        Vec3x4 (WideF32x4 = f32x4 | 4) => Rotor3x4|Bivec3x4|Mat3x4 {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec3, m32x4])},
+        Vec3x8 (WideF32x8 = f32x8 | 8) => Rotor3x8|Bivec3x8|Mat3x8 {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec3, m32x8])}
+    ] => [3 := (x,y,z)],
     [
-        Vec4 (f32 = f32 | 1) {(REFLECTABLE), (FLOAT), (MANUAL_SIMD_OPS[Vec4, bool, (x,y,z,w)])}, IVec4 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec4 ( u32 = u32 | 1),
-        Vec4x4 (WideF32x4 = f32x4 | 4) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x4, (x,y,z,w)])},
-        Vec4x8 (WideF32x8 = f32x8 | 8) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x8, (x,y,z,w)])}
-    ] => 4
+        Vec4 (f32 = f32 | 1) {(REFLECTABLE), (FLOAT), (MANUAL_SIMD_OPS[Vec4, bool])}, IVec4 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec4 ( u32 = u32 | 1),
+        Vec4x4 (WideF32x4 = f32x4 | 4) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x4])},
+        Vec4x8 (WideF32x8 = f32x8 | 8) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x8])}
+    ] => [4 := (x,y,z,w)]
 );
 
 pub(crate) trait VectorAware<Vector>
@@ -414,169 +547,3 @@ where
 
 // impl vector-aware trait for the vectors itslef
 impl<Vector> VectorAware<Vector> for Vector where Vector: self::Vector {}
-
-/// A vector that carris with it a validity mask and a tag value (e.g. a 4/8-lane simd integer that stores eg the index of the scene object it belongs to or so) so that we can run vectorized stuff through the raytracer and keep track of which object it belongs to, even when say lan1 belongs to a sphere object and lane 3 to a triangle
-#[derive(Debug, Clone, PartialEq, Default)]
-struct TaggedSimdVector<V, Tag>
-where
-    V: Vector,
-    Tag: SimdValue + CheckScalarLanesMatch<{ V::LANES }>,
-    <V::Scalar as SimdValue>::SimdBool: Debug + PartialEq + Default,
-{
-    vector: V,
-    valid_mask: <V::Scalar as SimdValue>::SimdBool,
-    tag: Tag,
-}
-
-impl<V, Tag> Deref for TaggedSimdVector<V, Tag>
-where
-    V: Vector,
-    Tag: SimdValue + CheckScalarLanesMatch<{ V::LANES }>,
-{
-    type Target = V;
-    fn deref(&self) -> &Self::Target {
-        &self.vector
-    }
-}
-
-impl<V, Tag> Vector for TaggedSimdVector<V, Tag>
-where
-    Self: Clone + PartialEq + Debug,
-    V: Vector,
-    Tag: SimdValue + CheckScalarLanesMatch<{ V::LANES }>,
-{
-    type Scalar = V::Scalar;
-    type InnerScalar = V::InnerScalar;
-    const DIMENSIONS: usize = V::DIMENSIONS;
-}
-
-//
-// impl<V, Tag>  VectorOperations for TaggedSimdVector<V, Tag> where
-//     Self: Clone + PartialEq + Debug,
-//     V: Vector + VectorOperations + Default + SimdCapableVector,
-//     Tag: SimdValue + SimdPartialOrd+ CheckScalarLanesMatch<{ V::LANES }> + Default, {
-//     #[inline(always)]
-//     fn broadcast(val: Self::Scalar) -> Self {
-//         Self {
-//             vector: V::broadcast(val),
-//             valid_mask: <V::Scalar as SimdValue>::SimdBool::from_subset(&true),
-//             ..Default::default()
-//         }
-//     }
-//
-//     #[inline(always)]
-//     fn dot(&self, other: Self) -> Self::Scalar {
-//         V::dot(&self.vector, other.vector)
-//     }
-//
-//     #[inline(always)]
-//     fn mag_sq(&self) -> Self::Scalar {
-//         V::mag_sq(&self.vector)
-//     }
-//
-//     #[inline(always)]
-//     fn mag(&self) -> Self::Scalar {
-//         V::mag(&self.vector)
-//     }
-//
-//
-//     #[inline(always)]
-//     fn mul_add(&self, mul: Self, add: Self) -> Self {
-//         let valid_mask = self.valid_mask & mul.valid_mask & add.valid_mask;
-//         let same_mask = self.tag.simd_eq( mul.tag) & (&self.tag).simd_eq( add.tag);
-//         Self {
-//             vector: V::mul_add(&self.vector, mul.vector, add.vector),
-//             valid_mask: valid_mask & same_mask,
-//             tag: self.tag
-//         }
-//     }
-//
-//     #[inline(always)]
-//     fn abs(&self) -> Self {
-//         Self {
-//             vector: V::abs(&self.vector),
-//             ..self
-//         }
-//     }
-//
-//     #[inline(always)]
-//     fn clamp(&mut self, min: Self, max: Self) {
-//         V::clamp(&mut self.vector, min.vector, max.vector);
-//     }
-//
-//     #[inline(always)]
-//     fn map<F>(&self, mut f: F) -> Self where F: FnMut(Self::Scalar) -> Self::Scalar {
-//         Self {
-//             vector: V::map(&self.vector, f),
-//             ..self
-//         }
-//     }
-//
-// #[inline(always)]
-// fn apply<F>(&mut self, mut f: F) where F: FnMut(Self::Scalar ) -> Self::Scalar {
-//     $vec::apply(self, |s|{
-//         let val =  *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&s) };
-//
-//         let result = f(val);
-//
-//         *unsafe { cast_simd_value::<$scalar_type, $inner_scalar>(&result) }
-//     });
-// }
-//
-// #[inline(always)]
-// fn max_by_component(self, other: Self) -> Self {
-//     $vec::max_by_component(self, other)
-// }
-//
-// #[inline(always)]
-// fn min_by_component(self, other: Self) -> Self {
-//     $vec::min_by_component(self, other)
-// }
-//
-// #[inline(always)]
-// fn component_max(&self) -> Self::Scalar {
-//     let max = $vec::component_max(self);
-//     *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&max) }
-// }
-//
-// #[inline(always)]
-// fn component_min(&self) -> Self::Scalar {
-//     let min = $vec::component_min(self);
-//     *unsafe { cast_simd_value::<$inner_scalar, $scalar_type>(&min) }
-// }
-//
-// #[inline(always)]
-// fn zero() -> Self {
-//     Self::zero()
-// }
-//
-// #[inline(always)]
-// fn one() -> Self {
-//     Self::one()
-// }
-//
-// fn sample_random() -> Self where rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar> {
-//     use rand::Rng;
-//     let mut rng = crate::random::pseudo_rng();
-//     let random = rng.r#gen::<[$scalar_type; $dims]>();
-//     let casted_random = (*unsafe { cast_simd_value::<[$scalar_type;$dims],[$inner_scalar;$dims]>(&random) });
-//     casted_random.into()
-// }
-// }
-
-#[test]
-fn d() {
-    let x = TaggedSimdVector {
-        vector: Vec3::new(0.0, 0.2, 0.1),
-        valid_mask: true,
-        tag: 0.0f32,
-    };
-    println!("{:#?}", <Vec3 as Vector>::LANES);
-    println!("{:#?}", <WideF32x4 as SimdValue>::LANES);
-
-    let x = WideF64x4::default();
-    // println!(
-    //     "{:#?}",
-    //     <WideF32x4 as CheckScalarLanesMatch<{ <Vec3 as Vector>::LANES }>>::CHECK
-    // );
-}

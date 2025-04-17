@@ -1,4 +1,7 @@
 mod intersectable;
-// mod raytracer;
+mod material;
+mod surface_interaction;
 
-pub(crate) use intersectable::{Intersectable, RayIntersection, RayIntersectionCandidate};
+pub(crate) use intersectable::Intersectable;
+pub(crate) use material::Material;
+pub(crate) use surface_interaction::SurfaceInteraction;

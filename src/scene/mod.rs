@@ -1,6 +1,6 @@
 mod lighting;
-mod scene;
-mod scene_object;
+// mod scene;
+//mod unified_scene;
 
 pub(crate) use lighting::{AmbientLight, Light, Lightable, PointLight /*ShadingPipeline*/};
-pub(crate) use scene_object::SceneObject;
+// pub(crate) use unified_scene::UnifiedSceneSimd;

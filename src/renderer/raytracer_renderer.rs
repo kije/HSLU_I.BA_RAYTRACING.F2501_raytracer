@@ -6,6 +6,7 @@ use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::izip;
 use rayon::iter::ParallelIterator;
+use simba::simd::SimdComplexField;
 
 // Import the consolidated traits
 use crate::color_traits::LightCompatibleColor;
@@ -14,8 +15,10 @@ use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use crate::vector::{NormalizableVector, Vector};
 
 use crate::color::ColorSimdExt;
-use crate::geometry::{Ray, SphereData};
-use crate::raytracing::{Intersectable, RayIntersection, RayIntersectionCandidate};
+use crate::geometry::{Ray, SphereData, TriangleData};
+use crate::raytracing::Intersectable;
+use crate::raytracing::Material;
+use crate::raytracing::SurfaceInteraction;
 use crate::scene::{AmbientLight, Light, PointLight};
 use num_traits::{One, Zero};
 use palette::Srgb;
@@ -27,12 +30,42 @@ use simba::simd::{SimdBool, SimdPartialOrd, SimdValue};
 use std::fmt::Debug;
 use std::hint::{likely, unlikely};
 use std::marker::PhantomData;
+use std::rc::Rc;
+use std::sync::Arc;
 use std::sync::LazyLock;
 use ultraviolet::{Vec3, Vec3x8, f32x8};
 
-// Helper type alias to make the bounds more readable
+static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
-static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
+static LIGHTS: LazyLock<[PointLight<Vec3>; 4]> = LazyLock::new(|| {
+    [
+        PointLight::new(
+            Vec3::new(-100.0, 1000.0, -10.0),
+            ColorType::new(0.822, 0.675, 0.45),
+            1.0,
+        ),
+        PointLight::new(
+            Vec3::new(1.0, -1.0, 100.0),
+            ColorType::new(0.0, 0.675, 0.9),
+            1.0,
+        ),
+        PointLight::new(
+            Vec3::new(0.0, 0.0, -100.0),
+            ColorType::new(0., 0., 0.),
+            0.95,
+        ),
+        PointLight::new(
+            Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 2) as f32, 120.0),
+            ColorType::new(0.7, 0.56, 0.5),
+            1.0,
+        ),
+    ]
+});
+
+// For SIMD, we need to split objects by type for efficient processing
+// For a real raytracer, you'd want to implement spatial partitioning (BVH, KD-tree, etc.)
+
+static SIMD_SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
     [
         SphereData::new(
             Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
@@ -53,23 +86,31 @@ static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
             90.0,
             ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
         ),
-        SphereData::new(
+        SphereData::with_material(
             Vec3::new(
                 2.0 * (WINDOW_WIDTH as f32 / 2.5),
                 2.0 * (WINDOW_HEIGHT as f32 / 2.5),
                 250.0,
             ),
             120.0,
-            ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
+            Material::new(
+                ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
+                0.85,
+                0.25,
+            ),
         ),
-        SphereData::new(
+        SphereData::with_material(
             Vec3::new(
                 1.25 * (WINDOW_WIDTH as f32 / 2.5),
                 0.5 * (WINDOW_HEIGHT as f32 / 2.5),
                 90.0,
             ),
             30.0,
-            ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
+            Material::new(
+                ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
+                1.0,
+                0.5,
+            ),
         ),
         SphereData::new(
             Vec3::new(
@@ -101,40 +142,32 @@ static SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
     ]
 });
 
-static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
-
-static LIGHTS: LazyLock<[PointLight<Vec3>; 4]> = LazyLock::new(|| {
-    [
-        PointLight::new(
-            Vec3::new(-100.0, 1000.0, -10.0),
-            ColorType::new(0.822, 0.675, 0.45),
-            1.0,
-        ),
-        PointLight::new(
-            Vec3::new(1.0, -1.0, 100.0),
-            ColorType::new(0.0, 0.675, 0.9),
-            1.0,
-        ),
-        PointLight::new(
-            Vec3::new(0.0, 0.0, -100.0),
-            ColorType::new(0., 0., 0.),
-            0.95,
-        ),
-        PointLight::new(
-            Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 2) as f32, 120.0),
-            ColorType::new(0.7, 0.56, 0.5),
-            1.0,
-        ),
-    ]
+static SIMD_TRIANGLES: LazyLock<Vec<TriangleData<Vec3>>> = LazyLock::new(|| {
+    vec![TriangleData::with_material(
+        Vec3::new(WINDOW_WIDTH as f32 * 0.2, WINDOW_HEIGHT as f32 * 0.2, 240.0),
+        Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.8, 200.0),
+        Vec3::new(WINDOW_WIDTH as f32 * 0.7, WINDOW_HEIGHT as f32 * 0.2, 160.0),
+        Material::new(ColorType::new(0.5, 0.7, 0.8), 0.5, 0.5),
+    )]
 });
 
-trait SceneObjectIterator<'a, V: 'a + SimdRenderingVector>:
+trait SceneSphereIterator<'a, V: 'a + SimdRenderingVector>:
     IntoIterator<Item = &'a SphereData<V::SingleValueVector>> + Clone + Sync
 {
 }
 
-impl<'a, T, V: 'a + SimdRenderingVector> SceneObjectIterator<'a, V> for T where
+impl<'a, T, V: 'a + SimdRenderingVector> SceneSphereIterator<'a, V> for T where
     T: IntoIterator<Item = &'a SphereData<V::SingleValueVector>> + Clone + Sync
+{
+}
+
+trait SceneTriangleIterator<'a, V: 'a + SimdRenderingVector>:
+    IntoIterator<Item = &'a TriangleData<V::SingleValueVector>> + Clone + Sync
+{
+}
+
+impl<'a, T, V: 'a + SimdRenderingVector> SceneTriangleIterator<'a, V> for T where
+    T: IntoIterator<Item = &'a TriangleData<V::SingleValueVector>> + Clone + Sync
 {
 }
 
@@ -156,7 +189,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let (colors, valid) = Self::get_pixel_color_vectorized(
             Vec3::new(x as f32, y as f32, 0.0),
             RENDER_RAY_DIRECTION,
-            SPHERES.iter(),
+            SIMD_SPHERES.iter(),
+            SIMD_TRIANGLES.iter(),
             LIGHTS.iter(),
         )?;
 
@@ -167,11 +201,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         Some(Pixel(colors))
     }
 
-    // Significantly simplified trait bounds using consolidated traits
     fn get_pixel_color_vectorized<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl SceneObjectIterator<'a, V>,
+        spheres: impl SceneSphereIterator<'a, V>,
+        triangles: impl SceneTriangleIterator<'a, V>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -187,17 +221,17 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let antialiasing = cfg!(feature = "anti_aliasing");
 
         if antialiasing {
-            Self::antialiased_raytrace(coords, unit_z, spheres, lights)
+            Self::antialiased_raytrace(coords, unit_z, spheres, triangles, lights)
         } else {
-            Self::single_raytrace(coords, unit_z, spheres, lights)
+            Self::single_raytrace(coords, unit_z, spheres, triangles, lights)
         }
     }
 
-    // Separate function for a single raytrace calculation
     fn single_raytrace<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl SceneObjectIterator<'a, V>,
+        spheres: impl SceneSphereIterator<'a, V>,
+        triangles: impl SceneTriangleIterator<'a, V>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -214,120 +248,81 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             <V::Scalar as SimdValue>::SimdBool::splat(false),
         );
 
-        // Find nearest intersection
-        let nearest_intersection = Self::find_nearest_intersection(&ray, spheres)?;
+        // For SIMD rays, we process each geometry type separately and find the nearest
+        let mut nearest_interaction: Option<SurfaceInteraction<V>> = None;
 
-        if nearest_intersection.valid_mask.none() {
-            return None;
+        // Process spheres
+        for sphere in spheres {
+            // Create SIMD sphere
+            let sphere_simd = SphereData::<V>::splat(sphere);
+
+            // Check intersection
+            if let Some(interaction) = sphere_simd.intersect(&ray) {
+                if interaction.valid_mask.none() {
+                    continue;
+                }
+
+                // Update nearest interaction
+                nearest_interaction = match nearest_interaction {
+                    None => Some(interaction),
+                    Some(ref current) => {
+                        let closer =
+                            interaction.distance.simd_lt(current.distance) & interaction.valid_mask;
+
+                        if closer.none() {
+                            nearest_interaction
+                        } else if closer.all() {
+                            Some(interaction)
+                        } else {
+                            Some(SurfaceInteraction::blend(closer, &interaction, current))
+                        }
+                    }
+                };
+            }
         }
 
-        // Calculate intersection details
-        let intersected_object = nearest_intersection.payload;
-        let RayIntersection {
-            intersection: intersection_point,
-            valid_mask,
-            normal: _intersection_normal,
-            ..
-        } = intersected_object.intersect(
-            &ray,
-            &RayIntersectionCandidate::new(
-                nearest_intersection.t,
-                &intersected_object,
-                nearest_intersection.valid_mask,
-            ),
-        );
+        // Process triangles
+        for triangle in triangles {
+            // Create SIMD triangle
+            let triangle_simd = TriangleData::<V>::splat(triangle);
+
+            // Check intersection
+            if let Some(interaction) = triangle_simd.intersect(&ray) {
+                if interaction.valid_mask.none() {
+                    continue;
+                }
+
+                // Update nearest interaction
+                nearest_interaction = match nearest_interaction {
+                    None => Some(interaction),
+                    Some(ref current) => {
+                        let closer =
+                            interaction.distance.simd_lt(current.distance) & interaction.valid_mask;
+
+                        if closer.none() {
+                            nearest_interaction
+                        } else if closer.all() {
+                            Some(interaction)
+                        } else {
+                            Some(SurfaceInteraction::blend(closer, &interaction, current))
+                        }
+                    }
+                };
+            }
+        }
+
+        // If no intersection found, return None
+        let interaction = nearest_interaction?;
 
         // Calculate lighting
-        let color = Self::calculate_lighting(
-            &intersected_object,
-            intersection_point,
-            ray.direction.normalized(),
-            valid_mask,
-            lights,
-        );
+        let color = Self::calculate_lighting(&interaction, ray.direction.normalized(), lights);
 
-        Some((color, valid_mask))
+        Some((color, interaction.valid_mask))
     }
 
-    // Find the nearest intersection among all objects
-    fn find_nearest_intersection<'a, V>(
-        ray: &Ray<V>,
-        spheres: impl SceneObjectIterator<'a, V>,
-    ) -> Option<RayIntersectionCandidate<V::Scalar, SphereData<V>>>
-    where
-        V: 'a + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
-    {
-        spheres
-            .clone()
-            .into_iter()
-            .fold(None, |previous_intersection, sphere| {
-                let sphere = SphereData::<V>::splat(sphere);
-                let new_intersection = sphere.check_intersection(ray, sphere);
-
-                // If no intersection with current object, keep previous result
-                if new_intersection.valid_mask.none() {
-                    return previous_intersection;
-                }
-
-                // If no previous intersection, use current
-                let Some(previous_intersection) = previous_intersection else {
-                    return Some(new_intersection);
-                };
-
-                // If previous has no valid intersections, use current
-                if previous_intersection.valid_mask.none() {
-                    return Some(new_intersection);
-                }
-
-                // Compare distances
-                let new_is_nearer = previous_intersection.t.simd_ge(new_intersection.t);
-
-                // Simple cases: one is entirely closer than the other
-                if new_is_nearer.none() {
-                    return Some(previous_intersection);
-                } else if new_is_nearer.all() {
-                    return Some(new_intersection);
-                }
-
-                // Complex case: merge intersections based on which is closer for each lane
-                Self::merge_intersections(&previous_intersection, &new_intersection, new_is_nearer)
-            })
-    }
-
-    // Merge two intersections based on which one is closer for each SIMD lane
-    fn merge_intersections<V>(
-        previous: &RayIntersectionCandidate<V::Scalar, SphereData<V>>,
-        new: &RayIntersectionCandidate<V::Scalar, SphereData<V>>,
-        new_is_nearer: <<V as Vector>::Scalar as SimdValue>::SimdBool,
-    ) -> Option<RayIntersectionCandidate<V::Scalar, SphereData<V>>>
-    where
-        V: SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
-    {
-        let previous_valid = previous.valid_mask;
-        let new_valid = new.valid_mask;
-
-        // Compute the mask for picking previous intersection values
-        let pick_old_mask =
-            (previous_valid & !new_valid) | (previous_valid & new_valid & !new_is_nearer);
-
-        // Blend fields using the mask
-        let merged_t = previous.t.select(pick_old_mask.clone(), new.t);
-        let merged_payload = SphereData::<V>::blend(pick_old_mask, &previous.payload, &new.payload);
-        let merged_valid = previous_valid | new_valid;
-
-        Some(RayIntersectionCandidate::new(
-            merged_t,
-            merged_payload,
-            merged_valid,
-        ))
-    }
-
-    // Calculate lighting for an intersection point
     fn calculate_lighting<'a, V>(
-        object: &SphereData<V>,
-        intersection_point: V,
+        interaction: &SurfaceInteraction<V>,
         view_dir: V,
-        valid_mask: <<V as Vector>::Scalar as SimdValue>::SimdBool,
         lights: impl SceneLightIterator<'a, V>,
     ) -> ColorType<V::Scalar>
     where
@@ -338,41 +333,75 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let one = V::Scalar::one();
 
         // Create ambient light
-        let ambient_light = AmbientLight::new(ColorType::new(one, one, one), zero);
+        let ambient_light =
+            AmbientLight::<V>::new(ColorType::new(one, one, one), V::Scalar::from_subset(&0.1));
+
+        // Get material color
+        let material_color = interaction.material.color.clone();
+
+        // Calculate ambient lighting
+        let ambient_contribution = ColorType::blend(
+            interaction.valid_mask,
+            &(material_color.clone() * ambient_light.color),
+            &Srgb::<V::Scalar>::new(zero, zero, zero),
+        ) * ambient_light.intensity;
 
         // Calculate direct lighting from all point lights
         let mut light_color = Srgb::<V::Scalar>::new(zero, zero, zero);
-        for light in lights.into_iter() {
-            let light = PointLight::<V>::splat(light);
-            let contribution =
-                light.calculate_contribution_at(object, intersection_point, view_dir);
 
+        for light in lights {
+            // Create SIMD light
+            let light = PointLight::<V>::splat(&light);
+            let contribution =
+                light.calculate_contribution_at(interaction, interaction.point, view_dir);
+
+            let light_position = light.position;
+            let light_color_simd = contribution.color;
+            let light_intensity = contribution.intensity;
+
+            // Calculate light direction (from intersection point to light)
+            let light_dir = (light_position - interaction.point).normalized();
+
+            // Calculate diffuse factor
+            let diffuse_factor = interaction.normal.dot(light_dir).simd_max(zero);
+
+            // Calculate specular reflection
+            let reflection = light_dir.reflected(interaction.normal);
+            let specular_factor = reflection
+                .normalized()
+                .dot(view_dir)
+                .simd_max(zero)
+                .simd_powi(32);
+
+            // Adjust specular based on material roughness
+            let roughness_factor = V::Scalar::one() - interaction.material.roughness;
+            let specular = specular_factor * roughness_factor;
+
+            // Combined lighting for this light
+            let light_factor = (diffuse_factor + specular) * light_intensity;
+
+            // Only apply light where the surface faces the light
+            let light_valid = diffuse_factor.simd_gt(zero);
+
+            // Add light contribution
             light_color = light_color
                 + ColorType::blend(
-                    contribution.valid_mask,
-                    &(contribution.color * contribution.intensity),
+                    light_valid & interaction.valid_mask,
+                    &(light_color_simd * light_factor),
                     &Srgb::<V::Scalar>::new(zero, zero, zero),
                 );
         }
 
-        // Calculate ambient lighting
-        let ambient_contribution =
-            ambient_light.calculate_contribution_at(object, intersection_point, view_dir);
-
-        // Combine lighting and apply valid mask
-        ColorType::blend(
-            valid_mask,
-            &((ambient_contribution.color * ambient_contribution.intensity) + light_color),
-            &Srgb::<V::Scalar>::new(zero, zero, zero),
-        )
+        // Combine ambient and direct lighting
+        ambient_contribution + light_color
     }
 
     #[inline(always)]
-    // Separate function for antialiased raytracing
     fn antialiased_raytrace<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl SceneObjectIterator<'a, V>,
+        spheres: impl SceneSphereIterator<'a, V>,
+        triangles: impl SceneTriangleIterator<'a, V>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -400,6 +429,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     coords + V::sample_random(),
                     unit_z,
                     spheres.clone(),
+                    triangles.clone(),
                     lights.clone(),
                 )
                 .map(|(c, m)| (c * scale, m))
@@ -432,7 +462,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 let Some((colors, valid_mask)) = Self::get_pixel_color_vectorized(
                     coords,
                     Vec3x8::unit_z(),
-                    SPHERES.iter(),
+                    SIMD_SPHERES.iter(),
+                    SIMD_TRIANGLES.iter(),
                     LIGHTS.iter(),
                 ) else {
                     return;

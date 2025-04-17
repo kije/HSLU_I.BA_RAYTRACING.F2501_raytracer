@@ -19,6 +19,7 @@ pub(crate) mod vector;
 
 // New modules for trait simplification
 pub(crate) mod color_traits;
+pub(crate) mod matrix;
 pub(crate) mod scalar_traits;
 pub(crate) mod simd_compat;
 pub(crate) mod vector_traits;
