@@ -3,46 +3,20 @@
 #![feature(likely_unlikely)]
 #![allow(incomplete_features)]
 
-pub(crate) mod color;
-pub(crate) mod extensions;
-pub(crate) mod geometry;
-pub(crate) mod helpers;
-pub(crate) mod image_buffer;
-pub(crate) mod math;
-pub(crate) mod output;
-pub(crate) mod random;
-pub(crate) mod raytracing;
-pub(crate) mod renderer;
-pub(crate) mod scalar;
-pub(crate) mod scene;
-pub(crate) mod vector;
-
-// New modules for trait simplification
-pub(crate) mod color_traits;
-pub(crate) mod matrix;
-pub(crate) mod scalar_traits;
-pub(crate) mod simd_compat;
-pub(crate) mod vector_traits;
-
-use crate::helpers::RenderTiming;
-use crate::image_buffer::ImageBuffer;
-use crate::output::{Output, OutputInteractive, WindowColorEncoder, WindowOutput};
-use crate::renderer::{RaytracerRenderer, Renderer};
+use raytracer::{
+    WINDOW_HEIGHT, WINDOW_WIDTH,
+    helpers::RenderTiming,
+    image_buffer::ImageBuffer,
+    output::{Output, OutputInteractive, WindowColorEncoder, WindowOutput},
+    renderer::{RaytracerRenderer, Renderer},
+};
 use std::sync::Arc;
 use std::thread;
 
-const WINDOW_WIDTH: usize = if cfg!(feature = "high_resolution") {
-    1620
-} else {
-    768
-};
-const WINDOW_HEIGHT: usize = if cfg!(feature = "high_resolution") {
-    1280
-} else {
-    640
-};
-
 fn main() {
+    // Uncomment to run benchmarks
+    // simd_polygon_triangulation_bench::run_triangulation_benchmarks();
+
     let buffer = Arc::new(ImageBuffer::<WINDOW_WIDTH, WINDOW_HEIGHT>::new());
 
     let buffer_render = buffer.clone();

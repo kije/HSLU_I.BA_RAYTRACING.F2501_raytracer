@@ -1,7 +1,8 @@
-mod ray;
-mod sphere;
-mod triangle;
+mod basic;
+mod composite;
+pub mod ray;
 
-pub(crate) use ray::Ray;
-pub(crate) use sphere::SphereData;
-pub(crate) use triangle::TriangleData;
+pub use basic::sphere::SphereData;
+pub use basic::triangle::TriangleData;
+pub use composite::{BoundedPlane, CompositeGeometry};
+pub use ray::Ray;

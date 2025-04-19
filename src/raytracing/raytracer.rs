@@ -10,7 +10,7 @@ use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect};
 use simba::scalar::SubsetOf;
 use simba::simd::{SimdBool, SimdValue};
 
-pub(crate) type SingleValueVectorScalar<V> =
+pub type SingleValueVectorScalar<V> =
     <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar;
 
 struct Raytracer;

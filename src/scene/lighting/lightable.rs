@@ -2,7 +2,7 @@ use crate::helpers::ColorType;
 use crate::vector::Vector;
 
 /// Trait for objects that can be lit
-pub(crate) trait Lightable<V>
+pub trait Lightable<V>
 where
     V: Vector,
 {

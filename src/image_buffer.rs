@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::AtomicU32;
 
 #[repr(transparent)]
-pub(crate) struct ImageBuffer<const W: usize, const H: usize>
+pub struct ImageBuffer<const W: usize, const H: usize>
 where
     [(); W * H]:,
 {
@@ -25,7 +25,7 @@ where
         }
     }
 
-    pub(crate) const fn get_u32_slice(&self) -> &[u32] {
+    pub const fn get_u32_slice(&self) -> &[u32] {
         unsafe {
             // Convert the pointer of the atomic array to a pointer of u32.
             std::slice::from_raw_parts(self.buffer.as_ptr() as *const u32, self.buffer.len())

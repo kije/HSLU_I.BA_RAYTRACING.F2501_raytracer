@@ -7,7 +7,7 @@ use simba::simd::{SimdBool, SimdPartialOrd, SimdRealField, SimdSigned, SimdValue
 use std::fmt::Debug;
 use std::ops::Neg;
 
-pub(crate) trait SimdValueBoolExt: SimdValue<SimdBool: SimdValue<Element = bool>> {
+pub trait SimdValueBoolExt: SimdValue<SimdBool: SimdValue<Element = bool>> {
     fn create_mask(mask: <Self::SimdBool as SimdValue>::Element) -> Self::SimdBool;
 }
 
@@ -20,7 +20,7 @@ where
     }
 }
 
-pub(crate) trait SimdValueSimplified:
+pub trait SimdValueSimplified:
     Scalar
     + SubsetOf<Self>
     + SupersetOf<<Self as SimdValue>::Element>
@@ -88,17 +88,14 @@ impl<V> SimdValueSimplified for V where
 {
 }
 
-pub(crate) trait SimdValueSignedSimplified:
-    SimdValueSimplified + Neg<Output = Self> + SimdSigned
-{
-}
+pub trait SimdValueSignedSimplified: SimdValueSimplified + Neg<Output = Self> + SimdSigned {}
 
 impl<V> SimdValueSignedSimplified for V where
     V: SimdValueSimplified + Neg<Output = Self> + SimdSigned
 {
 }
 
-pub(crate) trait SimdValueRealSimplified:
+pub trait SimdValueRealSimplified:
     SimdValueSignedSimplified<Element: Float>
     + SimdRealField
     + palette::num::Real

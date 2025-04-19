@@ -12,11 +12,11 @@ use simba::simd::{SimdRealField, SimdValue};
 
 /// Pipeline for calculating lighting on objects
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ShadingPipeline;
+pub struct ShadingPipeline;
 
 impl ShadingPipeline {
     /// Calculate lighting for a lightable object using all provided lights
-    pub(crate) fn calculate_shading<'a, Vector, L>(
+    pub fn calculate_shading<'a, Vector, L>(
         lightable: &impl Lightable<Vector>,
         ambient: &impl Light<Vector>,
         lights: impl IntoIterator<

@@ -15,7 +15,7 @@ use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use crate::vector::{NormalizableVector, Vector};
 
 use crate::color::ColorSimdExt;
-use crate::geometry::{Ray, SphereData, TriangleData};
+use crate::geometry::{BoundedPlane, CompositeGeometry, Ray, SphereData, TriangleData};
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
@@ -33,7 +33,7 @@ use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::LazyLock;
-use ultraviolet::{Vec3, Vec3x8, f32x8};
+use ultraviolet::{Rotor3, Vec3, Vec3x8, f32x8};
 
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
@@ -143,12 +143,42 @@ static SIMD_SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
 });
 
 static SIMD_TRIANGLES: LazyLock<Vec<TriangleData<Vec3>>> = LazyLock::new(|| {
-    vec![TriangleData::with_material(
-        Vec3::new(WINDOW_WIDTH as f32 * 0.2, WINDOW_HEIGHT as f32 * 0.2, 240.0),
-        Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.8, 200.0),
-        Vec3::new(WINDOW_WIDTH as f32 * 0.7, WINDOW_HEIGHT as f32 * 0.2, 160.0),
+    let mut plane_up = Vec3::unit_y();
+    let mut plane_normal = -Vec3::unit_z();
+    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.45));
+    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.45));
+    let mut triangles = vec![TriangleData::with_material(
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.1,
+            WINDOW_HEIGHT as f32 * 0.25,
+            320.0,
+        ),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.35,
+            WINDOW_HEIGHT as f32 * 0.55,
+            320.0,
+        ),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.3,
+            WINDOW_HEIGHT as f32 * 0.15,
+            320.0,
+        ),
         Material::new(ColorType::new(0.5, 0.7, 0.8), 0.5, 0.5),
-    )]
+    )];
+
+    triangles.append(
+        &mut BoundedPlane::with_material(
+            plane_normal,
+            Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, 270.0),
+            plane_up,
+            WINDOW_WIDTH as f32 * 0.55,
+            WINDOW_HEIGHT as f32 * 0.55,
+            Material::new(ColorType::new(0.6, 0.7, 0.5), 0.05, 0.6),
+        )
+        .to_basic_geometries(),
+    );
+
+    triangles
 });
 
 trait SceneSphereIterator<'a, V: 'a + SimdRenderingVector>:
@@ -182,7 +212,7 @@ impl<'a, T, V: 'a + SimdRenderingVector> SceneLightIterator<'a, V> for T where
 }
 
 #[derive(Debug, Copy, Clone, Default)]
-pub(crate) struct RaytracerRenderer<C: OutputColorEncoder>(PhantomData<C>);
+pub struct RaytracerRenderer<C: OutputColorEncoder>(PhantomData<C>);
 
 impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
@@ -251,6 +281,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         // For SIMD rays, we process each geometry type separately and find the nearest
         let mut nearest_interaction: Option<SurfaceInteraction<V>> = None;
 
+        // todo maybe we can unify the following logic by storing geometry in a map structure that has as key a `GeometryKind` enum, and value a list of geometries
         // Process spheres
         for sphere in spheres {
             // Create SIMD sphere
@@ -267,14 +298,25 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     None => Some(interaction),
                     Some(ref current) => {
                         let closer =
-                            interaction.distance.simd_lt(current.distance) & interaction.valid_mask;
+                            interaction.distance.simd_le(current.distance) & interaction.valid_mask;
 
                         if closer.none() {
-                            nearest_interaction
+                            Some(SurfaceInteraction::blend(
+                                current.valid_mask,
+                                current,
+                                &interaction,
+                            ))
                         } else if closer.all() {
                             Some(interaction)
                         } else {
-                            Some(SurfaceInteraction::blend(closer, &interaction, current))
+                            let pick_old_mask = (interaction.valid_mask & !current.valid_mask)
+                                | (interaction.valid_mask & current.valid_mask & closer);
+
+                            Some(SurfaceInteraction::blend(
+                                pick_old_mask,
+                                &interaction,
+                                current,
+                            ))
                         }
                     }
                 };
@@ -297,14 +339,25 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     None => Some(interaction),
                     Some(ref current) => {
                         let closer =
-                            interaction.distance.simd_lt(current.distance) & interaction.valid_mask;
+                            interaction.distance.simd_le(current.distance) & interaction.valid_mask;
 
                         if closer.none() {
-                            nearest_interaction
+                            Some(SurfaceInteraction::blend(
+                                current.valid_mask,
+                                current,
+                                &interaction,
+                            ))
                         } else if closer.all() {
                             Some(interaction)
                         } else {
-                            Some(SurfaceInteraction::blend(closer, &interaction, current))
+                            let pick_old_mask = (interaction.valid_mask & !current.valid_mask)
+                                | (interaction.valid_mask & current.valid_mask & closer);
+
+                            Some(SurfaceInteraction::blend(
+                                pick_old_mask,
+                                &interaction,
+                                current,
+                            ))
                         }
                     }
                 };
@@ -315,7 +368,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let interaction = nearest_interaction?;
 
         // Calculate lighting
-        let color = Self::calculate_lighting(&interaction, ray.direction.normalized(), lights);
+        let color = Self::calculate_lighting(&interaction, ray.direction, lights);
 
         Some((color, interaction.valid_mask))
     }

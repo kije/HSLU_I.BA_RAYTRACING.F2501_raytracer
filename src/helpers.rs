@@ -9,11 +9,11 @@ use wide::{
     u16x8, u16x16, u32x4, u32x8, u64x2, u64x4,
 };
 
-pub(crate) type ColorType<T = f32> = Srgb<T>;
+pub type ColorType<T = f32> = Srgb<T>;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(transparent)]
-pub(crate) struct Pixel(pub ColorType);
+pub struct Pixel(pub ColorType);
 
 impl Pixel {
     pub const fn new(r: u8, g: u8, b: u8) -> Self {
@@ -39,7 +39,7 @@ impl Deref for Pixel {
 }
 
 // fixme move this somewhere else / other module
-pub(crate) trait Splatable<Source> {
+pub trait Splatable<Source> {
     /// Create a new instance by "splatting" the source value across all SIMD lanes
     fn splat(source: &Source) -> Self;
 }
@@ -103,7 +103,7 @@ impl_splatable_wide!(
 );
 
 #[derive(Debug, Copy, Clone, PartialEq)]
-pub(crate) struct RenderTiming {
+pub struct RenderTiming {
     pub iteration: u128,
     pub elapsed_time_since_start: Duration,
     pub delta: Duration,
@@ -135,7 +135,7 @@ impl RenderTiming {
 }
 
 #[inline(always)]
-pub(crate) const fn fast_inverse(value: f32) -> f32 {
+pub const fn fast_inverse(value: f32) -> f32 {
     debug_assert!(value >= 0.0);
     f32::from_bits(0x7f00_0000 - value.to_bits())
 }

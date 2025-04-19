@@ -9,7 +9,7 @@ use std::ops::{Add, Neg, Sub};
 
 #[derive(Debug, Copy, Clone)]
 #[repr(transparent)]
-pub(crate) struct PointData<V>
+pub struct PointData<V>
 where
     V: BaseVector,
 {
@@ -20,7 +20,7 @@ impl<V> PointData<V>
 where
     V: BaseVector,
 {
-    pub(crate) const fn new(p: V) -> Self {
+    pub const fn new(p: V) -> Self {
         Self { p }
     }
 }
@@ -29,7 +29,7 @@ impl<V> PointData<V>
 where
     V: SimdRenderingVector,
 {
-    pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
+    pub fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
         Self {
             p: V::blend(mask, t.p.clone(), f.p.clone()),
         }
@@ -48,6 +48,7 @@ where
 }
 
 impl<V> VectorAware<V> for PointData<V> where V: BaseVector {}
+impl<V> BasicGeometry<V> for PointData<V> where V: BaseVector {}
 
 impl<V: BaseVector> Sub<V> for PointData<V> {
     type Output = Self;

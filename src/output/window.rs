@@ -5,7 +5,7 @@ use minifb::{Key, Result as WindowResult, Scale, ScaleMode, Window, WindowOption
 use std::thread;
 
 #[derive(Debug)]
-pub(crate) struct WindowOutputInner<const W: usize, const H: usize> {
+pub struct WindowOutputInner<const W: usize, const H: usize> {
     window: Window,
 }
 
@@ -23,12 +23,12 @@ impl<const W: usize, const H: usize> Output<W, H> for WindowOutputInner<W, H> {
 }
 
 #[derive(Debug)]
-pub(crate) struct WindowOutput<const W: usize, const H: usize> {
+pub struct WindowOutput<const W: usize, const H: usize> {
     inner: WindowOutputInner<W, H>,
 }
 
 impl<const W: usize, const H: usize> WindowOutput<W, H> {
-    pub(crate) fn new() -> WindowResult<Self> {
+    pub fn new() -> WindowResult<Self> {
         Ok(Self {
             inner: WindowOutputInner::<W, H> {
                 window: Window::new(
@@ -83,7 +83,7 @@ impl<const W: usize, const H: usize> OutputInteractive<W, H> for WindowOutput<W,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct WindowColorEncoder;
+pub struct WindowColorEncoder;
 
 impl OutputColorEncoder for WindowColorEncoder {
     #[inline(always)]

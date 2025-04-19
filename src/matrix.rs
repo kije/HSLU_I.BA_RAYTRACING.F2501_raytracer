@@ -1,4 +1,4 @@
-use crate::vector::Vector;
+use crate::vector::{Vector, VectorFixedDimensions};
 use itertools::Itertools;
 use std::fmt::Debug;
 use std::ops::{Add, Mul};
@@ -26,10 +26,10 @@ pub trait Matrix:
     // /// Vector type with one lower dimension than Self::Vector
     // type LowerDimVector: Vector<Scalar = <Self::Vector as Vector>::Scalar>;
 
-    const LANES: usize = Self::Vector::LANES;
-    const DIMENSIONS: usize = Self::Vector::DIMENSIONS;
-    const COLUMNS: usize = Self::DIMENSIONS;
-    const ROWS: usize = Self::DIMENSIONS;
+    const LANES: usize = <Self::Vector as Vector>::LANES;
+    const DIMENSIONS: usize = <Self::Vector as Vector>::DIMENSIONS;
+    const COLUMNS: usize = <Self as Matrix>::DIMENSIONS;
+    const ROWS: usize = <Self as Matrix>::DIMENSIONS;
 }
 
 pub trait MatrixOperations: Matrix {

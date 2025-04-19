@@ -2,6 +2,7 @@ use crate::helpers::Splatable;
 use crate::matrix::Matrix;
 use crate::scalar::Scalar;
 use crate::simd_compat::SimdValueSimplified;
+use itertools::Position::Last;
 use simba::scalar::SupersetOf;
 use simba::simd::{SimdValue, WideF32x4, WideF32x8};
 use std::fmt::Debug;
@@ -140,9 +141,7 @@ pub trait RotatableVector: VectorAssociations {
     fn rotated_by(self, rotor: Self::Rotor) -> Self;
 }
 
-pub(crate) trait CheckVectorDimensionsMatch<const REQUIRED_DIMENSIONS: usize>:
-    Vector
-{
+pub trait CheckVectorDimensionsMatch<const REQUIRED_DIMENSIONS: usize>: Vector {
     const CHECK: ();
 }
 
@@ -150,6 +149,16 @@ impl<const REQUIRED_DIMENSIONS: usize, T: Vector + ?Sized>
     CheckVectorDimensionsMatch<REQUIRED_DIMENSIONS> for T
 {
     const CHECK: () = [()][(Self::DIMENSIONS != REQUIRED_DIMENSIONS) as usize];
+}
+
+pub trait VectorFixedDimensions<const DIMENSIONS: usize>: Vector {
+    const DIMENSIONS: usize = DIMENSIONS;
+
+    fn from_components(components: [Self::Scalar; DIMENSIONS]) -> Self;
+}
+
+pub trait VectorFixedLanes<const LANES: usize>: Vector {
+    const LANES: usize = LANES;
 }
 
 #[inline(always)]
@@ -425,6 +434,18 @@ macro_rules! impl_vector {
             }
         }
 
+        impl crate::vector::VectorFixedDimensions<$dims> for $vec {
+            #[inline(always)]
+            fn from_components(components: [Self::Scalar; $dims]) -> Self {
+                Self::from(
+                    impl_vector!(@cast_simd_value [$scalar_type;$dims], [$inner_scalar;$dims], components)
+                )
+            }
+        }
+        impl crate::vector::VectorFixedLanes<$lanes> for $vec {
+
+        }
+
         $(
             tt_if!{
                 condition = [{tt_equal}]
@@ -538,7 +559,7 @@ impl_vector!(
     ] => [4 := (x,y,z,w)]
 );
 
-pub(crate) trait VectorAware<Vector>
+pub trait VectorAware<Vector>
 where
     Vector: self::Vector,
 {

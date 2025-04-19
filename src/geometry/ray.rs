@@ -6,13 +6,13 @@ use std::fmt::Debug;
 
 // todo: idea impl mul<scalar> / div<scalar> trait to shrink/stretch ray by a factor (simply calling ray.at(factor))? Or do we need a line primitive for that? -> needs propper handling of validity mask if we would also support wide/Simd data types?
 #[derive(Clone, Debug, Copy)]
-pub(crate) struct Ray<Vector>
+pub struct Ray<Vector>
 where
     Vector: crate::vector::Vector,
 {
-    pub(crate) origin: Vector,
-    pub(crate) direction: Vector, // todo introduce a "Direction" newtype that garatuees already a normalized vector
-    pub(crate) valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
+    pub origin: Vector,
+    pub direction: Vector, // todo introduce a "Direction" newtype that garatuees already a normalized vector
+    pub valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
 }
 
 impl<Vector> Ray<Vector>
@@ -20,7 +20,7 @@ where
     Vector: crate::vector::Vector,
 {
     #[inline]
-    pub(crate) fn new(origin: Vector, direction: Vector) -> Self
+    pub fn new(origin: Vector, direction: Vector) -> Self
     where
         Vector: NormalizableVector,
         [(); <Vector as crate::vector::Vector>::LANES]:,
@@ -29,7 +29,7 @@ where
     }
 
     #[inline]
-    pub(crate) fn new_with_mask(
+    pub fn new_with_mask(
         origin: Vector,
         direction: Vector,
         valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
@@ -45,7 +45,7 @@ where
     }
 
     #[inline(always)]
-    pub(crate) fn at(&self, t: Vector::Scalar) -> Vector
+    pub fn at(&self, t: Vector::Scalar) -> Vector
     where
         Vector: VectorOperations + Copy,
     {
@@ -62,17 +62,17 @@ where
     <Vector::Scalar as SimdValue>::Element: Float,
 {
     #[inline(always)]
-    pub(crate) fn invalid_value() -> <Vector::Scalar as SimdValue>::Element {
+    pub fn invalid_value() -> <Vector::Scalar as SimdValue>::Element {
         <Vector::Scalar as SimdValue>::Element::infinity()
     }
 
     #[inline(always)]
-    pub(crate) fn invalid_value_splatted() -> Vector::Scalar {
+    pub fn invalid_value_splatted() -> Vector::Scalar {
         Vector::Scalar::splat(Self::invalid_value())
     }
 
     #[inline(always)]
-    pub(crate) fn invalid_vector() -> Vector
+    pub fn invalid_vector() -> Vector
     where
         Vector: VectorOperations,
     {

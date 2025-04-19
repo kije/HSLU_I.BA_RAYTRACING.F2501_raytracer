@@ -12,14 +12,14 @@ use simba::scalar::SupersetOf;
 use simba::simd::{SimdPartialOrd, SimdValue};
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct LightContribution<S: LightScalar> {
-    pub(crate) color: ColorType<S>,
-    pub(crate) intensity: S,
-    pub(crate) valid_mask: S::SimdBool,
+pub struct LightContribution<S: LightScalar> {
+    pub color: ColorType<S>,
+    pub intensity: S,
+    pub valid_mask: S::SimdBool,
 }
 
 impl<S: LightScalar> LightContribution<S> {
-    pub(crate) const fn new(color: ColorType<S>, intensity: S, valid_mask: S::SimdBool) -> Self {
+    pub const fn new(color: ColorType<S>, intensity: S, valid_mask: S::SimdBool) -> Self {
         Self {
             color,
             intensity,
@@ -56,7 +56,7 @@ where
 
 #[enum_dispatch]
 /// Base trait for all light types
-pub(crate) trait Light<V>
+pub trait Light<V>
 where
     V: RenderingVector,
 {
@@ -70,12 +70,12 @@ where
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct AmbientLight<V>
+pub struct AmbientLight<V>
 where
     V: RenderingVector,
 {
-    pub(crate) color: ColorType<V::Scalar>,
-    pub(crate) intensity: V::Scalar,
+    pub color: ColorType<V::Scalar>,
+    pub intensity: V::Scalar,
 }
 
 impl<V> AmbientLight<V>
@@ -91,7 +91,7 @@ impl<V> AmbientLight<V>
 where
     V: SimdRenderingVector,
 {
-    pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
+    pub fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
         Self {
             color: ColorSimdExt::blend(mask, &t.color, &f.color),
             intensity: t.intensity.clone().select(mask, f.intensity.clone()),
@@ -148,24 +148,20 @@ where
 }
 
 #[derive(Debug, Copy, Clone)]
-pub(crate) struct PointLight<V>
+pub struct PointLight<V>
 where
     V: RenderingVector,
 {
-    pub(crate) position: V,
-    pub(crate) color: ColorType<V::Scalar>,
-    pub(crate) intensity: V::Scalar,
+    pub position: V,
+    pub color: ColorType<V::Scalar>,
+    pub intensity: V::Scalar,
 }
 
 impl<V> PointLight<V>
 where
     V: RenderingVector,
 {
-    pub(crate) const fn new(
-        position: V,
-        color: ColorType<V::Scalar>,
-        intensity: V::Scalar,
-    ) -> Self {
+    pub const fn new(position: V, color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
         Self {
             position,
             color,
@@ -178,7 +174,7 @@ impl<V> PointLight<V>
 where
     V: SimdRenderingVector,
 {
-    pub(crate) fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
+    pub fn blend(mask: <V::Scalar as SimdValue>::SimdBool, t: &Self, f: &Self) -> Self {
         Self {
             position: V::blend(mask, t.position.clone(), f.position.clone()),
             color: ColorSimdExt::blend(mask, &t.color, &f.color),
@@ -250,7 +246,7 @@ where
 }
 
 #[enum_dispatch(Light<V>)]
-pub(crate) enum SceneLightSource<V>
+pub enum SceneLightSource<V>
 where
     V: SimdRenderingVector,
     ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,

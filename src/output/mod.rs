@@ -2,13 +2,13 @@ use crate::image_buffer::ImageBuffer;
 
 mod window;
 use crate::helpers::{Pixel, RenderTiming};
-pub(crate) use window::{WindowColorEncoder, WindowOutput};
+pub use window::{WindowColorEncoder, WindowOutput};
 
-pub(crate) trait OutputColorEncoder {
+pub trait OutputColorEncoder {
     fn to_output(pixel: &Pixel) -> u32;
 }
 
-pub(crate) trait Output<const W: usize, const H: usize> {
+pub trait Output<const W: usize, const H: usize> {
     type ColorEncoder: OutputColorEncoder;
 
     fn render_buffer(&mut self, buffer: &ImageBuffer<W, H>)
@@ -16,7 +16,7 @@ pub(crate) trait Output<const W: usize, const H: usize> {
         [(); W * H]:;
 }
 
-pub(crate) trait OutputInteractive<const W: usize, const H: usize> {
+pub trait OutputInteractive<const W: usize, const H: usize> {
     type Output: Output<W, H>;
 
     fn render_loop<F: FnMut(&mut Self::Output, &RenderTiming)>(&mut self, cb: F);

@@ -614,6 +614,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
+name = "pastey"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b3a8cb46bdc156b1c90460339ae6bfd45ba0394e5effbaa640badb4987fdc261"
+
+[[package]]
 name = "phf"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -779,7 +785,6 @@ name = "raytracer"
 version = "0.1.0"
 dependencies = [
  "assert_float_eq",
- "by_address",
  "enum_dispatch",
  "incr_stats",
  "itertools",
@@ -788,11 +793,10 @@ dependencies = [
  "num-traits",
  "o2o",
  "palette",
- "paste",
+ "pastey",
  "rand",
  "rayon",
  "simba",
- "simd_aligned",
  "tt-call",
  "tt-equal",
  "ultraviolet",
@@ -921,15 +925,6 @@ dependencies = [
  "num-traits",
  "paste",
  "rand",
- "wide",
-]
-
-[[package]]
-name = "simd_aligned"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43bb409d114ccef278270a2ccde8fc8ee444d1863e6419c4c75aab6525c1b8cc"
-dependencies = [
  "wide",
 ]
 

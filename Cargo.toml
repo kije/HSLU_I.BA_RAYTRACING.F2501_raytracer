@@ -3,6 +3,14 @@ name = "raytracer"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "raytracer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "raytracer"
+path = "src/main.rs"
+
 [dependencies]
 minifb = "0.28"
 rayon = "1.10"
@@ -12,12 +20,12 @@ palette = { version = "0.7", git = "https://github.com/kije/palette.git", featur
 
 
 wide = "0.7"
-simd_aligned = "0.6"
+# simd_aligned = "0.6"
 simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support", "rand"] }
 num-traits = "0.2"
-paste = "1.0.15"
+pastey = "0.1.0"
 itertools = "0.14"
-by_address = "1.2.1"
+# by_address = "1.2.1"
 tt-call = "1.0"
 tt-equal = "0.1.2"
 

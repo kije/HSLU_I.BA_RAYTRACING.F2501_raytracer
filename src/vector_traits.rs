@@ -7,7 +7,7 @@ use crate::vector::{
 use std::ops::{Add, Mul, Neg, Sub};
 
 /// A basic vector trait combining common vector operations
-pub(crate) trait BaseVector:
+pub trait BaseVector:
     Vector
     + Add<Self, Output = Self>
     + Sub<Self, Output = Self>
@@ -31,7 +31,7 @@ impl<V> BaseVector for V where
 }
 
 /// A trait for vectors with common operations for rendering
-pub(crate) trait RenderingVector:
+pub trait RenderingVector:
     BaseVector<Scalar: LightScalar>
     + NormalizableVector
     + ReflectableVector
@@ -56,7 +56,7 @@ impl<V> RenderingVector for V where
 
 /// A trait for SIMD-compatible vectors with enhanced features needed for rendering,
 /// including mask operations that support lazy selection
-pub(crate) trait SimdRenderingVector:
+pub trait SimdRenderingVector:
     RenderingVector + SimdCapableVector<SingleValueVector: RenderingVector>
 {
 }

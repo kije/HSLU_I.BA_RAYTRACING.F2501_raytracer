@@ -8,7 +8,7 @@ pub trait Scalar: 'static + Clone + PartialEq + Debug {}
 
 impl<T: 'static + Clone + PartialEq + Debug> Scalar for T {}
 
-pub(crate) trait CheckScalarLanesMatch<const REQUIRED_LANES: usize>: SimdValue {
+pub trait CheckScalarLanesMatch<const REQUIRED_LANES: usize>: SimdValue {
     const CHECK: ();
 }
 

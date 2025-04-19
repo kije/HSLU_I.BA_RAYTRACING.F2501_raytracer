@@ -1,10 +1,14 @@
-use crate::geometry::Ray;
+use crate::geometry::basic::BasicGeometry;
+use crate::geometry::{Ray, SphereData};
 use crate::helpers::{ColorType, Splatable};
 use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
-use crate::vector::{SimdCapableVector, Vector, Vector3DAccessor, VectorAssociations, VectorAware};
+use crate::vector::{
+    NormalizableVector, SimdCapableVector, Vector, Vector3DAccessor, VectorAssociations,
+    VectorAware,
+};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use num_traits::One;
 use num_traits::Zero;
@@ -140,4 +144,12 @@ impl<
             valid_mask,
         ))
     }
+}
+
+impl<V> BasicGeometry<V> for TriangleData<V> where
+    V: SimdRenderingVector
+        + Vector3DAccessor
+        + Neg<Output = V>
+        + VectorAssociations<Matrix: MatrixFixedDimensions<3> + MatrixOperations>
+{
 }

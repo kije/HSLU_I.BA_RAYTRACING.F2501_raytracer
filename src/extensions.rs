@@ -5,7 +5,7 @@ use simba::simd::{WideBoolF32x4, WideBoolF32x8, WideF32x4, WideF32x8};
 use ultraviolet::{m32x4, m32x8};
 use wide::{f32x4, f32x8};
 
-pub(crate) trait SrgbColorConvertExt {
+pub trait SrgbColorConvertExt {
     /// Number of expected output elements
     /// If 0, indicates that number of output elements are not known at compile time
     const NUM_OUTPUT_VALUES: usize;

@@ -3,7 +3,7 @@ use simba::scalar::SubsetOf;
 use simba::simd::SimdValue;
 
 // fixme: this might be a trait thai is not only useful to have for colors, e.g. geometry and basically anything VectorAware (or SimdSclaraAware) could use this?
-pub(crate) trait ColorSimdExt<Scalar>
+pub trait ColorSimdExt<Scalar>
 where
     Scalar: crate::scalar::Scalar + SimdValue,
 {

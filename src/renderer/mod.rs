@@ -16,14 +16,14 @@ use std::{mem, thread};
 mod raytracer_renderer;
 
 use crate::output::OutputColorEncoder;
-pub(crate) use raytracer_renderer::RaytracerRenderer;
+pub use raytracer_renderer::RaytracerRenderer;
 
-pub(crate) struct RenderCoordinates {
+pub struct RenderCoordinates {
     x: usize,
     y: usize,
 }
 
-pub(crate) struct RenderCoordinatesVectorized<'a> {
+pub struct RenderCoordinatesVectorized<'a> {
     i: &'a [usize],
     x: &'a [f32],
     y: &'a [f32],
@@ -31,7 +31,7 @@ pub(crate) struct RenderCoordinatesVectorized<'a> {
 }
 
 #[cfg(feature = "render_timing_debug")]
-pub(crate) fn print_render_stats(render_times: &[f64]) {
+pub fn print_render_stats(render_times: &[f64]) {
     let mut render_times_stats = Stats::new(&render_times).unwrap();
     let (mid_range, mid_range_len) = if render_times.len() % 2 == 1 {
         ((render_times.len() / 2)..(render_times.len() / 2), 1)
@@ -71,7 +71,7 @@ pub(crate) fn print_render_stats(render_times: &[f64]) {
     println!("Max: {}", render_times_stats.max().unwrap());
 }
 
-pub(crate) trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
+pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
     const RENDER_STRIDE: usize = const {
         (W / 16)
             .next_multiple_of(64 / mem::size_of::<u32>())
