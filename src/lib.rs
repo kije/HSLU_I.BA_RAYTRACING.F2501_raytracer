@@ -24,13 +24,37 @@ pub mod scalar_traits;
 pub mod simd_compat;
 pub mod vector_traits;
 
-pub const WINDOW_WIDTH: usize = if cfg!(feature = "high_resolution") {
+pub const CONFIGURED_WINDOW_WIDTH: usize = if cfg!(feature = "high_resolution") {
     1620
 } else {
     768
 };
-pub const WINDOW_HEIGHT: usize = if cfg!(feature = "high_resolution") {
+
+pub const CONFIGURED_WINDOW_HEIGHT: usize = if cfg!(feature = "high_resolution") {
     1280
 } else {
     640
+};
+
+pub const WINDOW_WIDTH: usize = match option_env!("WINDOW_WIDTH") {
+    Some(width) => {
+        let parsed = usize::from_str_radix(width, 10);
+
+        match parsed {
+            Ok(parsed) => parsed,
+            Err(_) => CONFIGURED_WINDOW_WIDTH,
+        }
+    }
+    None => CONFIGURED_WINDOW_WIDTH,
+};
+pub const WINDOW_HEIGHT: usize = match option_env!("WINDOW_HEIGHT") {
+    Some(height) => {
+        let parsed = usize::from_str_radix(height, 10);
+
+        match parsed {
+            Ok(parsed) => parsed,
+            Err(_) => CONFIGURED_WINDOW_HEIGHT,
+        }
+    }
+    None => CONFIGURED_WINDOW_HEIGHT,
 };

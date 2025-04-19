@@ -35,7 +35,6 @@ rand = { version = "0.8", features = ["min_const_gen", "nightly", "small_rng"] }
 # todo use
 o2o = "0.5.3"
 michie = "3.0.2"
-enum_dispatch = "0.3.13"
 enumcapsulate = "0.6.2"
 
 

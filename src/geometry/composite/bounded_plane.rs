@@ -12,7 +12,6 @@ use simba::simd::SimdBool;
 use simba::simd::{SimdPartialOrd, SimdValue};
 
 pub struct BoundedPlane<V: Vector> {
-    normal: V,
     center: V,
     up: V,
     left: V,
@@ -46,7 +45,7 @@ impl<V: RenderingVector> BoundedPlane<V> {
         assert!(normal.dot(up).simd_eq(<V as Vector>::Scalar::zero()).all());
 
         Self {
-            normal,
+            // normal,
             center,
             up,
             left: normal.cross(up).normalized(),

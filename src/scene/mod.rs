@@ -1,6 +1,5 @@
 mod lighting;
-// mod scene;
-//mod unified_scene;
+mod scene;
 
 pub use lighting::{AmbientLight, Light, Lightable, PointLight /*ShadingPipeline*/};
-// pub use unified_scene::UnifiedSceneSimd;
+pub use scene::Scene;

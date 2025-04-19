@@ -5,7 +5,6 @@ use crate::scalar_traits::LightScalar;
 use crate::scene::lighting::Lightable;
 use crate::vector::{SimdCapableVector, VectorAware};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
-use enum_dispatch::enum_dispatch;
 use num_traits::{One, Zero};
 use palette::bool_mask::BoolMask;
 use simba::scalar::SupersetOf;
@@ -54,7 +53,6 @@ where
     }
 }
 
-#[enum_dispatch]
 /// Base trait for all light types
 pub trait Light<V>
 where
@@ -207,7 +205,7 @@ where
         &self,
         lightable: &impl Lightable<V>,
         point_position: V,
-        ray_from_direction: V,
+        _: V,
     ) -> LightContribution<V::Scalar> {
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
@@ -245,11 +243,29 @@ where
     }
 }
 
-#[enum_dispatch(Light<V>)]
 pub enum SceneLightSource<V>
 where
     V: SimdRenderingVector,
     ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
 {
     PointLight(PointLight<V>),
+}
+
+impl<V> Light<V> for SceneLightSource<V>
+where
+    V: SimdRenderingVector,
+    ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+{
+    fn calculate_contribution_at(
+        &self,
+        lightable: &impl Lightable<V>,
+        position: V,
+        ray_from_direction: V,
+    ) -> LightContribution<V::Scalar> {
+        match self {
+            SceneLightSource::PointLight(light) => {
+                light.calculate_contribution_at(lightable, position, ray_from_direction)
+            }
+        }
+    }
 }

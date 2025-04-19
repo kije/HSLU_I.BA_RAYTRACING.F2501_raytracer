@@ -23,8 +23,7 @@ where
     Triangle(TriangleData<V>),
 }
 
-impl<V: RenderingVector + NormalizableVector + SimdCapableVector> Intersectable<V>
-    for RenderGeometry<V>
+impl<V> Intersectable<V> for RenderGeometry<V>
 where
     V: SimdRenderingVector
         + Vector3DAccessor
@@ -53,7 +52,7 @@ where
     }
 }
 
-impl<V: Vector> RenderGeometry<V>
+impl<V> RenderGeometry<V>
 where
     V: Vector,
 {
@@ -68,7 +67,19 @@ where
     }
 }
 
-impl<V: Vector> BasicGeometry<V> for RenderGeometry<V> where
+impl<V: Vector> From<SphereData<V>> for RenderGeometry<V> {
+    fn from(sphere: SphereData<V>) -> Self {
+        RenderGeometry::Sphere(sphere)
+    }
+}
+
+impl<V: Vector> From<TriangleData<V>> for RenderGeometry<V> {
+    fn from(triangle: TriangleData<V>) -> Self {
+        RenderGeometry::Triangle(triangle)
+    }
+}
+
+impl<V> BasicGeometry<V> for RenderGeometry<V> where
     V: SimdRenderingVector
         + Vector3DAccessor
         + Neg<Output = V>
@@ -81,13 +92,9 @@ pub struct GeometryCollection<V: Vector> {
     geometries: HashMap<RenderGeometryKind, Vec<RenderGeometry<V>>>,
 }
 
-impl<V: Vector> GeometryCollection<V>
+impl<V> GeometryCollection<V>
 where
-    V: RenderingVector + NormalizableVector + SimdCapableVector,
-    V: SimdRenderingVector
-        + Vector3DAccessor
-        + Neg<Output = V>
-        + VectorAssociations<Matrix: MatrixFixedDimensions<3> + MatrixOperations>,
+    V: Vector,
 {
     /// Create a new empty geometry collection
     pub fn new() -> Self {

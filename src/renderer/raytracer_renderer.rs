@@ -22,7 +22,7 @@ use crate::geometry::{
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
-use crate::scene::{AmbientLight, Light, PointLight};
+use crate::scene::{AmbientLight, Light, PointLight, Scene};
 use num_traits::{One, Zero};
 use palette::Srgb;
 use palette::bool_mask::BoolMask;
@@ -66,23 +66,23 @@ static LIGHTS: LazyLock<[PointLight<Vec3>; 4]> = LazyLock::new(|| {
 });
 
 // Create a lazy-initialized GeometryCollection
-static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|| {
-    let mut collection = GeometryCollection::<Vec3>::new();
+static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
+    let mut scene = Scene::<Vec3>::with_capacities(20);
 
     // Add spheres
-    collection.add(RenderGeometry::new_sphere(SphereData::new(
+    scene.add_sphere(SphereData::new(
         Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
         70.0,
         ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::new(
+    scene.add_sphere(SphereData::new(
         Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
         90.0,
         ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::new(
+    scene.add_sphere(SphereData::new(
         Vec3::new(
             2.0 * (WINDOW_WIDTH as f32 / 2.5),
             WINDOW_HEIGHT as f32 / 2.5,
@@ -90,9 +90,9 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
         ),
         90.0,
         ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::with_material(
+    scene.add_sphere(SphereData::with_material(
         Vec3::new(
             2.0 * (WINDOW_WIDTH as f32 / 2.5),
             2.0 * (WINDOW_HEIGHT as f32 / 2.5),
@@ -104,9 +104,9 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
             0.85,
             0.25,
         ),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::with_material(
+    scene.add_sphere(SphereData::with_material(
         Vec3::new(
             1.25 * (WINDOW_WIDTH as f32 / 2.5),
             0.5 * (WINDOW_HEIGHT as f32 / 2.5),
@@ -118,9 +118,9 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
             1.0,
             0.5,
         ),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::new(
+    scene.add_sphere(SphereData::new(
         Vec3::new(
             WINDOW_WIDTH as f32 / 2.5,
             2.25 * (WINDOW_HEIGHT as f32 / 2.5),
@@ -128,9 +128,9 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
         ),
         250.0,
         ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::new(
+    scene.add_sphere(SphereData::new(
         Vec3::new(
             WINDOW_WIDTH as f32 / 4.0,
             3.0 * (WINDOW_HEIGHT as f32 / 4.0),
@@ -138,9 +138,9 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
         ),
         10.0,
         ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
-    )));
+    ));
 
-    collection.add(RenderGeometry::new_sphere(SphereData::new(
+    scene.add_sphere(SphereData::new(
         Vec3::new(
             WINDOW_WIDTH as f32 / 3.0,
             3.0 * (WINDOW_HEIGHT as f32 / 6.0),
@@ -148,7 +148,7 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
         ),
         25.0,
         ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
-    )));
+    ));
 
     // Add triangles
     let mut plane_up = Vec3::unit_y();
@@ -156,7 +156,7 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
     plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.45));
     plane_up.rotate_by(Rotor3::from_rotation_yz(-0.45));
 
-    collection.add(RenderGeometry::new_triangle(TriangleData::with_material(
+    scene.add_triangle(TriangleData::with_material(
         Vec3::new(
             WINDOW_WIDTH as f32 * 0.1,
             WINDOW_HEIGHT as f32 * 0.25,
@@ -173,7 +173,7 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
             320.0,
         ),
         Material::new(ColorType::new(0.5, 0.7, 0.8), 0.5, 0.5),
-    )));
+    ));
 
     // Convert BoundedPlane to basic geometries and add them
     let plane_triangles = BoundedPlane::with_material(
@@ -187,10 +187,10 @@ static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|
     .to_basic_geometries();
 
     for triangle in plane_triangles {
-        collection.add(RenderGeometry::new_triangle(triangle));
+        scene.add_triangle(triangle);
     }
 
-    collection
+    scene
 });
 
 trait RenderGeometryIterator<'a, V: 'a + SimdRenderingVector>:
@@ -221,10 +221,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let (colors, valid) = Self::get_pixel_color_vectorized(
             Vec3::new(x as f32, y as f32, 0.0),
             RENDER_RAY_DIRECTION,
-            GEOMETRY_COLLECTION
+            SCENE
+                .scene_objects
                 .get_by_kind(RenderGeometryKind::Sphere)
                 .iter(),
-            GEOMETRY_COLLECTION
+            SCENE
+                .scene_objects
                 .get_by_kind(RenderGeometryKind::Triangle)
                 .iter(),
             LIGHTS.iter(),
@@ -521,10 +523,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 let Some((colors, valid_mask)) = Self::get_pixel_color_vectorized(
                     coords,
                     Vec3x8::unit_z(),
-                    GEOMETRY_COLLECTION
+                    SCENE
+                        .scene_objects
                         .get_by_kind(RenderGeometryKind::Sphere)
                         .iter(),
-                    GEOMETRY_COLLECTION
+                    SCENE
+                        .scene_objects
                         .get_by_kind(RenderGeometryKind::Triangle)
                         .iter(),
                     LIGHTS.iter(),
