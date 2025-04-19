@@ -25,6 +25,7 @@ pub struct SurfaceInteraction<V: Vector> {
 
     /// Valid mask for SIMD operations
     pub valid_mask: <<V as Vector>::Scalar as SimdValue>::SimdBool,
+    // todo add a reference back to the intersected object
 }
 
 impl<V: RenderingVector + SimdCapableVector> SurfaceInteraction<V> {

@@ -15,7 +15,10 @@ use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use crate::vector::{NormalizableVector, Vector};
 
 use crate::color::ColorSimdExt;
-use crate::geometry::{BoundedPlane, CompositeGeometry, Ray, SphereData, TriangleData};
+use crate::geometry::{
+    BoundedPlane, CompositeGeometry, GeometryCollection, Ray, RenderGeometry, RenderGeometryKind,
+    SphereData, TriangleData,
+};
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
@@ -62,92 +65,98 @@ static LIGHTS: LazyLock<[PointLight<Vec3>; 4]> = LazyLock::new(|| {
     ]
 });
 
-// For SIMD, we need to split objects by type for efficient processing
-// For a real raytracer, you'd want to implement spatial partitioning (BVH, KD-tree, etc.)
+// Create a lazy-initialized GeometryCollection
+static GEOMETRY_COLLECTION: LazyLock<GeometryCollection<Vec3>> = LazyLock::new(|| {
+    let mut collection = GeometryCollection::<Vec3>::new();
 
-static SIMD_SPHERES: LazyLock<[SphereData<Vec3>; 8]> = LazyLock::new(|| {
-    [
-        SphereData::new(
-            Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
-            70.0,
-            ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
+    // Add spheres
+    collection.add(RenderGeometry::new_sphere(SphereData::new(
+        Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
+        70.0,
+        ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
+    )));
+
+    collection.add(RenderGeometry::new_sphere(SphereData::new(
+        Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
+        90.0,
+        ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
+    )));
+
+    collection.add(RenderGeometry::new_sphere(SphereData::new(
+        Vec3::new(
+            2.0 * (WINDOW_WIDTH as f32 / 2.5),
+            WINDOW_HEIGHT as f32 / 2.5,
+            150.0,
         ),
-        SphereData::new(
-            Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
-            90.0,
-            ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
-        ),
-        SphereData::new(
-            Vec3::new(
-                2.0 * (WINDOW_WIDTH as f32 / 2.5),
-                WINDOW_HEIGHT as f32 / 2.5,
-                150.0,
-            ),
-            90.0,
-            ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
-        ),
-        SphereData::with_material(
-            Vec3::new(
-                2.0 * (WINDOW_WIDTH as f32 / 2.5),
-                2.0 * (WINDOW_HEIGHT as f32 / 2.5),
-                250.0,
-            ),
-            120.0,
-            Material::new(
-                ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
-                0.85,
-                0.25,
-            ),
-        ),
-        SphereData::with_material(
-            Vec3::new(
-                1.25 * (WINDOW_WIDTH as f32 / 2.5),
-                0.5 * (WINDOW_HEIGHT as f32 / 2.5),
-                90.0,
-            ),
-            30.0,
-            Material::new(
-                ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
-                1.0,
-                0.5,
-            ),
-        ),
-        SphereData::new(
-            Vec3::new(
-                WINDOW_WIDTH as f32 / 2.5,
-                2.25 * (WINDOW_HEIGHT as f32 / 2.5),
-                500.0,
-            ),
+        90.0,
+        ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
+    )));
+
+    collection.add(RenderGeometry::new_sphere(SphereData::with_material(
+        Vec3::new(
+            2.0 * (WINDOW_WIDTH as f32 / 2.5),
+            2.0 * (WINDOW_HEIGHT as f32 / 2.5),
             250.0,
-            ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
         ),
-        SphereData::new(
-            Vec3::new(
-                WINDOW_WIDTH as f32 / 4.0,
-                3.0 * (WINDOW_HEIGHT as f32 / 4.0),
-                20.0,
-            ),
-            10.0,
-            ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
+        120.0,
+        Material::new(
+            ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
+            0.85,
+            0.25,
         ),
-        SphereData::new(
-            Vec3::new(
-                WINDOW_WIDTH as f32 / 3.0,
-                3.0 * (WINDOW_HEIGHT as f32 / 6.0),
-                30.0,
-            ),
-            25.0,
-            ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
-        ),
-    ]
-});
+    )));
 
-static SIMD_TRIANGLES: LazyLock<Vec<TriangleData<Vec3>>> = LazyLock::new(|| {
+    collection.add(RenderGeometry::new_sphere(SphereData::with_material(
+        Vec3::new(
+            1.25 * (WINDOW_WIDTH as f32 / 2.5),
+            0.5 * (WINDOW_HEIGHT as f32 / 2.5),
+            90.0,
+        ),
+        30.0,
+        Material::new(
+            ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
+            1.0,
+            0.5,
+        ),
+    )));
+
+    collection.add(RenderGeometry::new_sphere(SphereData::new(
+        Vec3::new(
+            WINDOW_WIDTH as f32 / 2.5,
+            2.25 * (WINDOW_HEIGHT as f32 / 2.5),
+            500.0,
+        ),
+        250.0,
+        ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
+    )));
+
+    collection.add(RenderGeometry::new_sphere(SphereData::new(
+        Vec3::new(
+            WINDOW_WIDTH as f32 / 4.0,
+            3.0 * (WINDOW_HEIGHT as f32 / 4.0),
+            20.0,
+        ),
+        10.0,
+        ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
+    )));
+
+    collection.add(RenderGeometry::new_sphere(SphereData::new(
+        Vec3::new(
+            WINDOW_WIDTH as f32 / 3.0,
+            3.0 * (WINDOW_HEIGHT as f32 / 6.0),
+            30.0,
+        ),
+        25.0,
+        ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
+    )));
+
+    // Add triangles
     let mut plane_up = Vec3::unit_y();
     let mut plane_normal = -Vec3::unit_z();
     plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.45));
     plane_up.rotate_by(Rotor3::from_rotation_yz(-0.45));
-    let mut triangles = vec![TriangleData::with_material(
+
+    collection.add(RenderGeometry::new_triangle(TriangleData::with_material(
         Vec3::new(
             WINDOW_WIDTH as f32 * 0.1,
             WINDOW_HEIGHT as f32 * 0.25,
@@ -164,40 +173,33 @@ static SIMD_TRIANGLES: LazyLock<Vec<TriangleData<Vec3>>> = LazyLock::new(|| {
             320.0,
         ),
         Material::new(ColorType::new(0.5, 0.7, 0.8), 0.5, 0.5),
-    )];
+    )));
 
-    triangles.append(
-        &mut BoundedPlane::with_material(
-            plane_normal,
-            Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, 270.0),
-            plane_up,
-            WINDOW_WIDTH as f32 * 0.55,
-            WINDOW_HEIGHT as f32 * 0.55,
-            Material::new(ColorType::new(0.6, 0.7, 0.5), 0.05, 0.6),
-        )
-        .to_basic_geometries(),
-    );
+    // Convert BoundedPlane to basic geometries and add them
+    let plane_triangles = BoundedPlane::with_material(
+        plane_normal,
+        Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, 270.0),
+        plane_up,
+        WINDOW_WIDTH as f32 * 0.55,
+        WINDOW_HEIGHT as f32 * 0.55,
+        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.05, 0.6),
+    )
+    .to_basic_geometries();
 
-    triangles
+    for triangle in plane_triangles {
+        collection.add(RenderGeometry::new_triangle(triangle));
+    }
+
+    collection
 });
 
-trait SceneSphereIterator<'a, V: 'a + SimdRenderingVector>:
-    IntoIterator<Item = &'a SphereData<V::SingleValueVector>> + Clone + Sync
+trait RenderGeometryIterator<'a, V: 'a + SimdRenderingVector>:
+    IntoIterator<Item = &'a RenderGeometry<V::SingleValueVector>> + Clone + Sync
 {
 }
 
-impl<'a, T, V: 'a + SimdRenderingVector> SceneSphereIterator<'a, V> for T where
-    T: IntoIterator<Item = &'a SphereData<V::SingleValueVector>> + Clone + Sync
-{
-}
-
-trait SceneTriangleIterator<'a, V: 'a + SimdRenderingVector>:
-    IntoIterator<Item = &'a TriangleData<V::SingleValueVector>> + Clone + Sync
-{
-}
-
-impl<'a, T, V: 'a + SimdRenderingVector> SceneTriangleIterator<'a, V> for T where
-    T: IntoIterator<Item = &'a TriangleData<V::SingleValueVector>> + Clone + Sync
+impl<'a, T, V: 'a + SimdRenderingVector> RenderGeometryIterator<'a, V> for T where
+    T: IntoIterator<Item = &'a RenderGeometry<V::SingleValueVector>> + Clone + Sync
 {
 }
 
@@ -219,8 +221,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let (colors, valid) = Self::get_pixel_color_vectorized(
             Vec3::new(x as f32, y as f32, 0.0),
             RENDER_RAY_DIRECTION,
-            SIMD_SPHERES.iter(),
-            SIMD_TRIANGLES.iter(),
+            GEOMETRY_COLLECTION
+                .get_by_kind(RenderGeometryKind::Sphere)
+                .iter(),
+            GEOMETRY_COLLECTION
+                .get_by_kind(RenderGeometryKind::Triangle)
+                .iter(),
             LIGHTS.iter(),
         )?;
 
@@ -234,8 +240,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn get_pixel_color_vectorized<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl SceneSphereIterator<'a, V>,
-        triangles: impl SceneTriangleIterator<'a, V>,
+        spheres: impl RenderGeometryIterator<'a, V>,
+        triangles: impl RenderGeometryIterator<'a, V>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -260,8 +266,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn single_raytrace<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl SceneSphereIterator<'a, V>,
-        triangles: impl SceneTriangleIterator<'a, V>,
+        spheres: impl RenderGeometryIterator<'a, V>,
+        triangles: impl RenderGeometryIterator<'a, V>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -285,7 +291,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         // Process spheres
         for sphere in spheres {
             // Create SIMD sphere
-            let sphere_simd = SphereData::<V>::splat(sphere);
+            let sphere_simd = RenderGeometry::<V>::splat(sphere);
 
             // Check intersection
             if let Some(interaction) = sphere_simd.intersect(&ray) {
@@ -326,7 +332,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         // Process triangles
         for triangle in triangles {
             // Create SIMD triangle
-            let triangle_simd = TriangleData::<V>::splat(triangle);
+            let triangle_simd = RenderGeometry::<V>::splat(triangle);
 
             // Check intersection
             if let Some(interaction) = triangle_simd.intersect(&ray) {
@@ -453,8 +459,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn antialiased_raytrace<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl SceneSphereIterator<'a, V>,
-        triangles: impl SceneTriangleIterator<'a, V>,
+        spheres: impl RenderGeometryIterator<'a, V>,
+        triangles: impl RenderGeometryIterator<'a, V>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -515,8 +521,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 let Some((colors, valid_mask)) = Self::get_pixel_color_vectorized(
                     coords,
                     Vec3x8::unit_z(),
-                    SIMD_SPHERES.iter(),
-                    SIMD_TRIANGLES.iter(),
+                    GEOMETRY_COLLECTION
+                        .get_by_kind(RenderGeometryKind::Sphere)
+                        .iter(),
+                    GEOMETRY_COLLECTION
+                        .get_by_kind(RenderGeometryKind::Triangle)
+                        .iter(),
                     LIGHTS.iter(),
                 ) else {
                     return;
