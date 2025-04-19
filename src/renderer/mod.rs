@@ -5,6 +5,9 @@ use rayon::prelude::*;
 use std::sync::atomic::Ordering;
 
 #[cfg(feature = "render_timing_debug")]
+use itertools::Itertools;
+
+#[cfg(feature = "render_timing_debug")]
 use incr_stats::vec::Stats;
 #[cfg(feature = "render_timing_debug")]
 use std::sync::{Arc, Mutex};
