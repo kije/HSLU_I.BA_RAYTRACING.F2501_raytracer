@@ -13,8 +13,8 @@ pub struct Material<S: SimdValueSimplified> {
     /// Reflectivity (0.0 = diffuse, 1.0 = mirror)
     pub reflectivity: S,
 
-    /// Roughness (affects specular highlight)
-    pub roughness: S,
+    /// Shininess of the surface (affects specular highlight) (0.0 = rough surface,  1.0 = very shiny)
+    pub shininess: S,
     // Additional parameters could be added like:
     // - metalness
     // - transparency
@@ -24,21 +24,17 @@ pub struct Material<S: SimdValueSimplified> {
 
 impl<S: SimdValueSimplified> Material<S> {
     /// Create a new material with basic properties
-    pub fn new(color: ColorType<S>, reflectivity: S, roughness: S) -> Self {
+    pub fn new(color: ColorType<S>, reflectivity: S, shininess: S) -> Self {
         Self {
             color,
             reflectivity,
-            roughness,
+            shininess,
         }
     }
 
     /// Create a simple diffuse material
     pub fn diffuse(color: ColorType<S>) -> Self {
-        Self {
-            color,
-            reflectivity: S::zero(),
-            roughness: S::one(),
-        }
+        Self::new(color, S::zero(), S::zero())
     }
 
     /// Blend two materials based on a mask
@@ -46,7 +42,7 @@ impl<S: SimdValueSimplified> Material<S> {
         Self {
             color: ColorSimdExt::blend(mask.clone(), &a.color, &b.color),
             reflectivity: a.reflectivity.select(mask.clone(), b.reflectivity),
-            roughness: a.roughness.select(mask, b.roughness),
+            shininess: a.shininess.select(mask, b.shininess),
         }
     }
 }
@@ -59,14 +55,14 @@ impl<SourceScalar: SimdValueSimplified, Scalar: SimdValueSimplified + Splatable<
         Material {
             color,
             reflectivity,
-            roughness,
+            shininess,
             ..
         }: &Material<SourceScalar>,
     ) -> Self {
         Material::new(
             Splatable::splat(color),
             Splatable::splat(reflectivity),
-            Splatable::splat(roughness),
+            Splatable::splat(shininess),
         )
     }
 }

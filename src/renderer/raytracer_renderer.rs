@@ -131,14 +131,18 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     //     ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
     // ));
 
-    scene.add_sphere(SphereData::new(
+    scene.add_sphere(SphereData::with_material(
         Vec3::new(
             1.9 * (WINDOW_WIDTH as f32 / 2.5),
             WINDOW_HEIGHT as f32 / 2.5,
             160.0,
         ),
         88.0,
-        ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
+        Material::new(
+            ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
+            0.01,
+            0.2,
+        ),
     ));
     //
     // scene.add_sphere(SphereData::with_material(
@@ -169,14 +173,18 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     //     ),
     // ));
     //
-    scene.add_sphere(SphereData::new(
+    scene.add_sphere(SphereData::with_material(
         Vec3::new(
             WINDOW_WIDTH as f32 / 2.5,
             2.25 * (WINDOW_HEIGHT as f32 / 2.5),
             500.0,
         ),
         250.0,
-        ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
+        Material::new(
+            ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
+            0.5,
+            0.05,
+        ),
     ));
     //
     // scene.add_sphere(SphereData::new(
@@ -246,7 +254,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         plane_up,
         WINDOW_WIDTH as f32 * 0.55,
         WINDOW_HEIGHT as f32 * 0.55,
-        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.05, 0.6),
+        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.05, 0.05),
     )
     .to_basic_geometries();
 
@@ -422,6 +430,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
             let contribution =
                 light.calculate_contribution_at(interaction, interaction.point, view_dir);
+
             let light_color_simd = contribution.color;
             let light_intensity = contribution.intensity;
 
@@ -432,25 +441,30 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             let reflection = light_dir.reflected(interaction.normal);
             let specular_factor = reflection
                 .normalized()
-                .dot(view_dir)
+                .dot(view_dir.normalized())
                 .simd_max(zero)
-                .simd_powi(32);
+                .simd_powf(
+                    (interaction.material.shininess * V::Scalar::from_subset(&(512.0)))
+                        .simd_max(V::Scalar::one()),
+                );
 
-            // Adjust specular based on material roughness
-            let roughness_factor = V::Scalar::one() - interaction.material.roughness;
-            let specular = specular_factor * roughness_factor;
-
+            let specular = specular_factor.select(
+                interaction.material.shininess.simd_gt(V::Scalar::zero()),
+                V::Scalar::zero(),
+            );
             // Combined lighting for this light
-            let light_factor = (diffuse_factor + specular) * light_intensity;
+            let light_factor = (diffuse_factor) * light_intensity;
 
-            // Only apply light where the surface faces the light
+            let specular_light = light.color * specular * light_intensity;
+
+            // Only apply light where the surface faces the light & is not blocked by the light
             let light_valid = diffuse_factor.simd_gt(zero) & light_can_reach_point;
 
             // Add light contribution
             light_color = light_color
                 + ColorType::blend(
                     light_valid & interaction.valid_mask,
-                    &(light_color_simd * light_factor),
+                    &((light_color_simd * light_factor) + specular_light),
                     &ColorType::<V::Scalar>::new(zero, zero, zero),
                 );
         }
