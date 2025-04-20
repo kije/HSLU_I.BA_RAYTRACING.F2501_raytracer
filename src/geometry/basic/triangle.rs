@@ -74,6 +74,28 @@ impl<V: RenderingVector> TriangleData<V> {
             material,
         }
     }
+
+    pub(in super::super) fn with_material_and_normal(
+        vertex1: V,
+        vertex2: V,
+        vertex3: V,
+        normal: V,
+        material: Material<V::Scalar>,
+    ) -> Self {
+        // Calculate the face normal
+        let edge1 = vertex2 - vertex1;
+        let edge2 = vertex3 - vertex1;
+
+        Self {
+            vertex1,
+            vertex2,
+            vertex3,
+            edge1,
+            edge2,
+            normal,
+            material,
+        }
+    }
 }
 
 impl<V> Splatable<TriangleData<<V as SimdCapableVector>::SingleValueVector>> for TriangleData<V>

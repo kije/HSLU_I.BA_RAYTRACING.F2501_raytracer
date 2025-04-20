@@ -1,4 +1,4 @@
-use palette::rgb::Srgb;
+use palette::LinSrgb;
 use simba::simd::{
     SimdValue, WideBoolF32x4, WideBoolF32x8, WideBoolF64x4, WideF32x4, WideF32x8, WideF64x4,
 };
@@ -9,7 +9,7 @@ use wide::{
     u16x8, u16x16, u32x4, u32x8, u64x2, u64x4,
 };
 
-pub type ColorType<T = f32> = Srgb<T>;
+pub type ColorType<T = f32> = LinSrgb<T>;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[repr(transparent)]
@@ -32,7 +32,7 @@ impl From<(u8, u8, u8)> for Pixel {
 }
 
 impl Deref for Pixel {
-    type Target = Srgb;
+    type Target = ColorType;
     fn deref(&self) -> &Self::Target {
         &self.0
     }

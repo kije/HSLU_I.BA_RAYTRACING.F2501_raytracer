@@ -15,12 +15,14 @@ pub struct BoundedPlane<V: Vector> {
     center: V,
     up: V,
     left: V,
+    normal: V,
     width: V::Scalar,
     height: V::Scalar,
     pub material: Material<V::Scalar>,
 }
 
 impl<V: RenderingVector> BoundedPlane<V> {
+    #[track_caller]
     pub fn new(
         normal: V,
         center: V,
@@ -32,6 +34,7 @@ impl<V: RenderingVector> BoundedPlane<V> {
         Self::with_material(normal, center, up, width, height, Material::diffuse(color))
     }
 
+    #[track_caller]
     pub fn with_material(
         normal: V,
         center: V,
@@ -40,15 +43,25 @@ impl<V: RenderingVector> BoundedPlane<V> {
         height: <V as Vector>::Scalar,
         material: Material<<V as Vector>::Scalar>,
     ) -> Self {
-        assert!(width.simd_gt(<V as Vector>::Scalar::zero()).all());
-        assert!(height.simd_gt(<V as Vector>::Scalar::zero()).all());
-        assert!(normal.dot(up).simd_eq(<V as Vector>::Scalar::zero()).all());
+        assert!(
+            width.simd_gt(<V as Vector>::Scalar::zero()).all(),
+            "width must be positive"
+        );
+        assert!(
+            height.simd_gt(<V as Vector>::Scalar::zero()).all(),
+            "height must be positive"
+        );
+        assert!(
+            normal.dot(up).simd_eq(<V as Vector>::Scalar::zero()).all(),
+            "up must be orthogonal to normal"
+        );
 
         Self {
             // normal,
             center,
             up,
             left: normal.cross(up).normalized(),
+            normal,
             width,
             height,
             material,
@@ -86,8 +99,20 @@ where
         let p3 = x - y;
 
         vec![
-            TriangleData::with_material(c + p1, c + p0, c + p3, self.material),
-            TriangleData::with_material(c + p2, c + p3, c + p0, self.material),
+            TriangleData::with_material_and_normal(
+                c + p1,
+                c + p0,
+                c + p3,
+                self.normal,
+                self.material,
+            ),
+            TriangleData::with_material_and_normal(
+                c + p2,
+                c + p3,
+                c + p0,
+                self.normal,
+                self.material,
+            ),
         ]
     }
 }

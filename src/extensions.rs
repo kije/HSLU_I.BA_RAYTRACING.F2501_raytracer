@@ -1,3 +1,4 @@
+use crate::helpers::ColorType;
 use itertools::{Itertools, izip};
 use palette::Srgb;
 use palette::num::One;
@@ -18,10 +19,10 @@ pub trait SrgbColorConvertExt {
 
 macro_rules! impl_srgb_color_convert {
     ($x: ident, $n: literal) => {
-        impl SrgbColorConvertExt for Srgb<concat_idents!(f32, $x)> {
+        impl SrgbColorConvertExt for ColorType<concat_idents!(f32, $x)> {
             const NUM_OUTPUT_VALUES: usize = $n;
 
-            type Output = [Option<Srgb<f32>>; Self::NUM_OUTPUT_VALUES];
+            type Output = [Option<ColorType<f32>>; Self::NUM_OUTPUT_VALUES];
             type Mask = concat_idents!(m32, $x);
 
             fn extract_values(self, mask: Option<Self::Mask>) -> Self::Output {
@@ -38,17 +39,17 @@ macro_rules! impl_srgb_color_convert {
                         return None;
                     }
 
-                    Some(Srgb::new(r, g, b))
+                    Some(ColorType::new(r, g, b))
                 })
                 .collect_array::<{ Self::NUM_OUTPUT_VALUES }>()
                 .unwrap()
             }
         }
 
-        impl SrgbColorConvertExt for Srgb<concat_idents!(WideF32, $x)> {
+        impl SrgbColorConvertExt for ColorType<concat_idents!(WideF32, $x)> {
             const NUM_OUTPUT_VALUES: usize = $n;
 
-            type Output = [Option<Srgb<f32>>; Self::NUM_OUTPUT_VALUES];
+            type Output = [Option<ColorType<f32>>; Self::NUM_OUTPUT_VALUES];
             type Mask = concat_idents!(WideBoolF32, $x);
 
             fn extract_values(self, mask: Option<Self::Mask>) -> Self::Output {
@@ -67,7 +68,7 @@ macro_rules! impl_srgb_color_convert {
                         return None;
                     }
 
-                    Some(Srgb::new(r, g, b))
+                    Some(ColorType::new(r, g, b))
                 })
                 .collect_array::<{ Self::NUM_OUTPUT_VALUES }>()
                 .unwrap()

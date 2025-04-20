@@ -85,14 +85,20 @@ pub trait Vector3DOperations: VectorAssociations {
 
 pub trait VectorAccessorX: Vector {
     fn x(&self) -> Self::Scalar;
+
+    fn unit_x() -> Self;
 }
 
 pub trait VectorAccessorY: Vector {
     fn y(&self) -> Self::Scalar;
+
+    fn unit_y() -> Self;
 }
 
 pub trait VectorAccessorZ: Vector {
     fn z(&self) -> Self::Scalar;
+
+    fn unit_z() -> Self;
 }
 
 pub trait Vector3DAccessor: VectorAccessorX + VectorAccessorY + VectorAccessorZ {}
@@ -457,6 +463,11 @@ macro_rules! impl_vector {
                             let x = self.x;
                             impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, x)
                         }
+
+                        #[inline(always)]
+                        fn unit_x() -> Self {
+                            $vec::unit_x()
+                        }
                     }
                 }]
                 false = [{
@@ -474,6 +485,11 @@ macro_rules! impl_vector {
                             let y = self.y;
                             impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, y)
                         }
+
+                        #[inline(always)]
+                        fn unit_y() -> Self {
+                            $vec::unit_y()
+                        }
                     }
                 }]
                 false = [{
@@ -490,6 +506,11 @@ macro_rules! impl_vector {
                         fn z(&self) -> Self::Scalar {
                             let z = self.z;
                             impl_vector!(@cast_simd_value $inner_scalar,  $scalar_type, z)
+                        }
+
+                        #[inline(always)]
+                        fn unit_z() -> Self {
+                            $vec::unit_z()
                         }
                     }
                 }]
