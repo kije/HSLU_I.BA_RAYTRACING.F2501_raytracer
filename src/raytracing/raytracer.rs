@@ -49,7 +49,11 @@ impl Raytracer {
         has_intersection
     }
 
-    pub fn cast_ray<V>(
+    /// Cast a ray in the scene and returns its intersection with the closest object.
+    ///
+    /// `IS_ANTIALIASING_RAY` param may be set to true if the ray is used for antialiasing and might be used to skip complex calculations that are not relevant for antialiasing
+    ///
+    pub fn cast_ray<const IS_ANTIALIASING_RAY: bool, V>(
         from: V,
         direction: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,

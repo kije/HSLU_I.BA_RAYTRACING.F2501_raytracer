@@ -3,10 +3,12 @@ use crate::color_traits::LightCompatibleColor;
 use crate::helpers::{ColorType, Splatable};
 use crate::scalar_traits::LightScalar;
 use crate::scene::lighting::Lightable;
-use crate::vector::{SimdCapableVector, VectorAware};
+use crate::vector::{SimdCapableVector, Vector, VectorAware};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
+use itertools::Itertools;
 use num_traits::{One, Zero};
 use palette::bool_mask::BoolMask;
+use rand::distributions::{Distribution, Standard};
 use simba::scalar::SupersetOf;
 use simba::simd::{SimdPartialOrd, SimdValue};
 
@@ -165,6 +167,30 @@ where
             color,
             intensity,
         }
+    }
+
+    pub fn to_point_light_cloud<const N: usize>(&self) -> [Self; N]
+    where
+        Standard: Distribution<<V as Vector>::Scalar>,
+    {
+        if N == 1 {
+            return [self.clone(); N];
+        }
+
+        let scale = V::Scalar::from_subset(&(1.0 / N as f32));
+        let cloud_radius = V::broadcast(V::Scalar::from_subset(&(1.35 + (N as f32 / 80.0))));
+
+        (0..N)
+            .map(|i| {
+                let mut l = self.clone();
+
+                l.position = l.position + (V::sample_random() * cloud_radius);
+                l.intensity = scale * l.intensity;
+
+                l
+            })
+            .collect_array::<{ N }>()
+            .expect("Failed to collect array.")
     }
 }
 

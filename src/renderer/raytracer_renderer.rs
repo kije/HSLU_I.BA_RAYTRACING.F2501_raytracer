@@ -4,7 +4,7 @@ use crate::image_buffer::ImageBuffer;
 use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
-use itertools::izip;
+use itertools::{Itertools, izip};
 use rayon::iter::ParallelIterator;
 use simba::simd::SimdComplexField;
 
@@ -40,53 +40,69 @@ use ultraviolet::{Rotor3, Vec3, Vec3x8, f32x8};
 
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
-static LIGHTS: LazyLock<[PointLight<Vec3>; 7]> = LazyLock::new(|| {
-    [
-        PointLight::new(
-            Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.1, 20.0),
-            ColorType::new(0.822, 0.675, 0.45),
-            0.25,
-        ),
-        PointLight::new(
-            Vec3::new(WINDOW_WIDTH as f32 / 3.5, WINDOW_HEIGHT as f32 / 3.5, 55.0),
-            ColorType::new(0.822, 0.675, 0.45),
-            1.0,
-        ),
-        PointLight::new(
-            Vec3::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32 / 2.5, 150.0),
-            ColorType::new(1.0, 1.0, 1.0),
-            0.85,
-        ),
-        PointLight::new(
-            Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 6) as f32, 60.0),
-            ColorType::new(0.75, 0.56, 0.5),
-            0.5,
-        ),
-        PointLight::new(
-            Vec3::new((WINDOW_WIDTH / 4) as f32, (WINDOW_HEIGHT / 6) as f32, 10.0),
-            ColorType::new(0.0, 0.5, 0.4),
-            0.3,
-        ),
-        PointLight::new(
-            Vec3::new(
-                (WINDOW_WIDTH as f32) / 1.25,
-                (WINDOW_HEIGHT / 3) as f32,
-                80.0,
+const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
+    if cfg!(feature = "high_quality") {
+        13
+    } else {
+        6
+    }
+} else {
+    1
+};
+
+static LIGHTS: LazyLock<[PointLight<Vec3>; { POINT_LIGHT_MULTIPLICATOR * 7 }]> =
+    LazyLock::new(|| {
+        [
+            PointLight::new(
+                Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.1, 20.0),
+                ColorType::new(0.822, 0.675, 0.45),
+                0.25,
             ),
-            ColorType::new(0.6, 0.2, 0.3),
-            0.35,
-        ),
-        PointLight::new(
-            Vec3::new(
-                (WINDOW_WIDTH as f32) / 2.0,
-                WINDOW_HEIGHT as f32 / 1.1,
-                140.0,
+            PointLight::new(
+                Vec3::new(WINDOW_WIDTH as f32 / 3.5, WINDOW_HEIGHT as f32 / 3.5, 55.0),
+                ColorType::new(0.822, 0.675, 0.45),
+                1.0,
             ),
-            ColorType::new(0.5, 0.5, 0.5),
-            0.6,
-        ),
-    ]
-});
+            PointLight::new(
+                Vec3::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32 / 2.5, 150.0),
+                ColorType::new(1.0, 1.0, 1.0),
+                0.85,
+            ),
+            PointLight::new(
+                Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 6) as f32, 60.0),
+                ColorType::new(0.75, 0.56, 0.5),
+                0.5,
+            ),
+            PointLight::new(
+                Vec3::new((WINDOW_WIDTH / 4) as f32, (WINDOW_HEIGHT / 6) as f32, 10.0),
+                ColorType::new(0.0, 0.5, 0.4),
+                0.3,
+            ),
+            PointLight::new(
+                Vec3::new(
+                    (WINDOW_WIDTH as f32) / 1.25,
+                    (WINDOW_HEIGHT / 3) as f32,
+                    80.0,
+                ),
+                ColorType::new(0.6, 0.2, 0.3),
+                0.35,
+            ),
+            PointLight::new(
+                Vec3::new(
+                    (WINDOW_WIDTH as f32) / 2.0,
+                    WINDOW_HEIGHT as f32 / 1.1,
+                    140.0,
+                ),
+                ColorType::new(0.5, 0.5, 0.5),
+                0.6,
+            ),
+        ]
+        .map(|light| light.to_point_light_cloud::<{ POINT_LIGHT_MULTIPLICATOR }>())
+        .into_iter()
+        .flatten()
+        .collect_array::<{ POINT_LIGHT_MULTIPLICATOR * 7 }>()
+        .unwrap()
+    });
 
 // Create a lazy-initialized GeometryCollection
 static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
@@ -319,11 +335,15 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         if antialiasing {
             Self::antialiased_raytrace(coords, unit_z, check_objects, lights)
         } else {
-            Self::single_raytrace(coords, unit_z, check_objects, lights)
+            Self::single_raytrace::<false, _>(coords, unit_z, check_objects, lights)
         }
     }
 
-    fn single_raytrace<'a, V>(
+    /// Does a single raytracing pass.
+    ///
+    /// `IS_ANTIALIASING_RAY` param may be set to true if the ray is used for antialiasing and might be used to skip complex calculations that are not relevant for antialiasing
+    ///
+    fn single_raytrace<'a, const IS_ANTIALIASING_RAY: bool, V>(
         coords: V,
         unit_z: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
@@ -337,7 +357,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
-        let (ray, nearest_interaction) = Raytracer::cast_ray(coords, unit_z, check_objects)?;
+        let (ray, nearest_interaction) =
+            Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(coords, unit_z, check_objects)?;
 
         let color =
             Self::calculate_lighting(&nearest_interaction, ray.direction, check_objects, lights);
@@ -354,6 +375,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     where
         V: 'a + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        Standard: Distribution<<V as Vector>::Scalar>,
     {
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
@@ -369,15 +391,16 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let ambient_contribution = ColorType::blend(
             interaction.valid_mask,
             &(material_color.clone() * ambient_light.color),
-            &Srgb::<V::Scalar>::new(zero, zero, zero),
+            &ColorType::<V::Scalar>::new(zero, zero, zero),
         ) * ambient_light.intensity;
 
         // Calculate direct lighting from all point lights
-        let mut light_color = Srgb::<V::Scalar>::new(zero, zero, zero);
+        let mut light_color = ColorType::<V::Scalar>::new(zero, zero, zero);
 
         for light in lights {
             // Create SIMD light
             let light = PointLight::<V>::splat(&light);
+
             let light_position = light.position;
 
             // Calculate light direction (from intersection point to light)
@@ -428,7 +451,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 + ColorType::blend(
                     light_valid & interaction.valid_mask,
                     &(light_color_simd * light_factor),
-                    &Srgb::<V::Scalar>::new(zero, zero, zero),
+                    &ColorType::<V::Scalar>::new(zero, zero, zero),
                 );
         }
 
@@ -451,33 +474,63 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
-        let samples_per_pixel = 32;
-        let scale = V::Scalar::from_subset(&(1.0 / samples_per_pixel as f32));
+        let x = V::unit_x();
+        let y = V::unit_y();
+
+        let tl = -x - y;
+        let tr = x - y;
+        let bl = -x + y;
+        let br = x + y;
+
+        let directions = [
+            tl.normalized(),
+            tr.normalized(),
+            bl.normalized(),
+            br.normalized(),
+        ];
+
+        let samples_per_pixel = if cfg!(feature = "high_quality") {
+            36usize
+        } else {
+            9usize
+        };
+        let scale = V::Scalar::from_subset(&(1.0 / (samples_per_pixel) as f32));
+        let sample_radius = V::broadcast(V::Scalar::from_subset(
+            &(0.85 + (samples_per_pixel as f32 / 100.0)),
+        ));
 
         let zero = V::Scalar::zero();
         let bool_false =
             <<<V as Vector>::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false);
 
-        let initial_color = ColorType::new(zero, zero, zero);
+        let default_color = ColorType::new(zero, zero, zero);
+        let default_mask = bool_false;
+        let (initial_color, initial_mask) =
+            Self::single_raytrace::<false, _>(coords, unit_z, check_objects, lights.clone())
+                .map(|(c, m)| (c * scale, m))
+                .unwrap_or((default_color, default_mask));
 
+        // fixme: maybe reordering the rays here so that 1 simd ray represents the different samples of the antialiasing for the same "real" pixel, because they cohere better, instead of the rays of independent "real" pixels.
         // Sample multiple rays and average the results
-        let (res_color, valid_mask) = (0..samples_per_pixel)
+        let (res_color, valid_mask) = (0..(samples_per_pixel - 1))
             .into_par_iter()
-            .filter_map(|_| {
-                Self::single_raytrace(
-                    coords + V::sample_random(),
+            .filter_map(|i| {
+                let sampling_direction_bias = directions[i % directions.len()];
+                let random_vec = V::sample_random() * sampling_direction_bias;
+                let (c, m) = Self::single_raytrace::<true, _>(
+                    coords + (random_vec * sample_radius),
                     unit_z,
                     check_objects,
                     lights.clone(),
-                )
-                .map(|(c, m)| (c * scale, m))
+                )?;
+                Some((c * scale, m))
             })
             .reduce(
-                || (initial_color, bool_false),
+                || (default_color, default_mask),
                 |(res_color, res_mask), (color, mask)| (color + res_color, res_mask | mask),
             );
 
-        Some((res_color, valid_mask))
+        Some((res_color + initial_color, valid_mask | initial_mask))
     }
 
     fn render_pixel_colors<'a>(
