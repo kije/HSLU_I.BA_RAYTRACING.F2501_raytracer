@@ -10,7 +10,7 @@ use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use crate::helpers::Splatable;
 use enumcapsulate::{Encapsulate, VariantDiscriminant};
 use std::collections::HashMap;
-use std::ops::Neg;
+use std::ops::{Deref, Index, Neg};
 
 /// Enum that represents all possible basic geometry types
 #[derive(Debug, Clone, Encapsulate, VariantDiscriminant)]
@@ -136,6 +136,22 @@ where
     /// Get all geometries
     pub fn get_all(&self) -> impl Iterator<Item = &RenderGeometry<V>> {
         self.geometries.values().flat_map(|v| v.iter())
+    }
+}
+
+impl<V: Vector> Deref for GeometryCollection<V> {
+    type Target = HashMap<RenderGeometryKind, Vec<RenderGeometry<V>>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.geometries
+    }
+}
+
+impl<V: Vector> Index<RenderGeometryKind> for GeometryCollection<V> {
+    type Output = [RenderGeometry<V>];
+
+    fn index(&self, index: RenderGeometryKind) -> &Self::Output {
+        self.get_by_kind(index)
     }
 }
 

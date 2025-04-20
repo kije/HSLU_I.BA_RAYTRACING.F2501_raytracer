@@ -19,9 +19,9 @@ use crate::geometry::{
     BoundedPlane, CompositeGeometry, GeometryCollection, Ray, RenderGeometry, RenderGeometryKind,
     SphereData, TriangleData,
 };
-use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
+use crate::raytracing::{Intersectable, Raytracer};
 use crate::scene::{AmbientLight, Light, PointLight, Scene};
 use num_traits::{One, Zero};
 use palette::Srgb;
@@ -40,27 +40,50 @@ use ultraviolet::{Rotor3, Vec3, Vec3x8, f32x8};
 
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
-static LIGHTS: LazyLock<[PointLight<Vec3>; 4]> = LazyLock::new(|| {
+static LIGHTS: LazyLock<[PointLight<Vec3>; 7]> = LazyLock::new(|| {
     [
         PointLight::new(
-            Vec3::new(-100.0, 1000.0, -10.0),
+            Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.1, 20.0),
+            ColorType::new(0.822, 0.675, 0.45),
+            0.25,
+        ),
+        PointLight::new(
+            Vec3::new(WINDOW_WIDTH as f32 / 3.5, WINDOW_HEIGHT as f32 / 3.5, 55.0),
             ColorType::new(0.822, 0.675, 0.45),
             1.0,
         ),
         PointLight::new(
-            Vec3::new(1.0, -1.0, 100.0),
-            ColorType::new(0.0, 0.675, 0.9),
-            1.0,
+            Vec3::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32 / 2.5, 150.0),
+            ColorType::new(1.0, 1.0, 1.0),
+            0.85,
         ),
         PointLight::new(
-            Vec3::new(0.0, 0.0, -100.0),
-            ColorType::new(0., 0., 0.),
-            0.95,
+            Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 6) as f32, 60.0),
+            ColorType::new(0.75, 0.56, 0.5),
+            0.5,
         ),
         PointLight::new(
-            Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 2) as f32, 120.0),
-            ColorType::new(0.7, 0.56, 0.5),
-            1.0,
+            Vec3::new((WINDOW_WIDTH / 4) as f32, (WINDOW_HEIGHT / 6) as f32, 10.0),
+            ColorType::new(0.0, 0.5, 0.4),
+            0.3,
+        ),
+        PointLight::new(
+            Vec3::new(
+                (WINDOW_WIDTH as f32) / 1.25,
+                (WINDOW_HEIGHT / 3) as f32,
+                80.0,
+            ),
+            ColorType::new(0.6, 0.2, 0.3),
+            0.35,
+        ),
+        PointLight::new(
+            Vec3::new(
+                (WINDOW_WIDTH as f32) / 2.0,
+                WINDOW_HEIGHT as f32 / 1.1,
+                140.0,
+            ),
+            ColorType::new(0.5, 0.5, 0.5),
+            0.6,
         ),
     ]
 });
@@ -71,55 +94,65 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
 
     // Add spheres
     scene.add_sphere(SphereData::new(
-        Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0, 150.0),
+        Vec3::new(
+            WINDOW_WIDTH as f32 / 2.5,
+            WINDOW_HEIGHT as f32 / 2.75,
+            170.0,
+        ),
         70.0,
         ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
     ));
 
     scene.add_sphere(SphereData::new(
-        Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
-        90.0,
-        ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
+        Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 1.5, 170.0),
+        70.0,
+        ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
     ));
+
+    // scene.add_sphere(SphereData::new(
+    //     Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 2.5, 150.0),
+    //     90.0,
+    //     ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
+    // ));
 
     scene.add_sphere(SphereData::new(
         Vec3::new(
-            2.0 * (WINDOW_WIDTH as f32 / 2.5),
+            1.9 * (WINDOW_WIDTH as f32 / 2.5),
             WINDOW_HEIGHT as f32 / 2.5,
-            150.0,
+            160.0,
         ),
-        90.0,
+        88.0,
         ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
     ));
-
-    scene.add_sphere(SphereData::with_material(
-        Vec3::new(
-            2.0 * (WINDOW_WIDTH as f32 / 2.5),
-            2.0 * (WINDOW_HEIGHT as f32 / 2.5),
-            250.0,
-        ),
-        120.0,
-        Material::new(
-            ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
-            0.85,
-            0.25,
-        ),
-    ));
-
-    scene.add_sphere(SphereData::with_material(
-        Vec3::new(
-            1.25 * (WINDOW_WIDTH as f32 / 2.5),
-            0.5 * (WINDOW_HEIGHT as f32 / 2.5),
-            90.0,
-        ),
-        30.0,
-        Material::new(
-            ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
-            1.0,
-            0.5,
-        ),
-    ));
-
+    //
+    // scene.add_sphere(SphereData::with_material(
+    //     Vec3::new(
+    //         2.0 * (WINDOW_WIDTH as f32 / 2.5),
+    //         2.0 * (WINDOW_HEIGHT as f32 / 2.5),
+    //         250.0,
+    //     ),
+    //     120.0,
+    //     Material::new(
+    //         ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
+    //         0.85,
+    //         0.25,
+    //     ),
+    // ));
+    //
+    // scene.add_sphere(SphereData::with_material(
+    //     Vec3::new(
+    //         1.25 * (WINDOW_WIDTH as f32 / 2.5),
+    //         0.5 * (WINDOW_HEIGHT as f32 / 2.5),
+    //         90.0,
+    //     ),
+    //     30.0,
+    //     Material::new(
+    //         ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
+    //         1.0,
+    //         0.5,
+    //     ),
+    // ));
+    //
     scene.add_sphere(SphereData::new(
         Vec3::new(
             WINDOW_WIDTH as f32 / 2.5,
@@ -129,56 +162,71 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         250.0,
         ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
     ));
-
-    scene.add_sphere(SphereData::new(
-        Vec3::new(
-            WINDOW_WIDTH as f32 / 4.0,
-            3.0 * (WINDOW_HEIGHT as f32 / 4.0),
-            20.0,
-        ),
-        10.0,
-        ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
-    ));
-
-    scene.add_sphere(SphereData::new(
-        Vec3::new(
-            WINDOW_WIDTH as f32 / 3.0,
-            3.0 * (WINDOW_HEIGHT as f32 / 6.0),
-            30.0,
-        ),
-        25.0,
-        ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
-    ));
+    //
+    // scene.add_sphere(SphereData::new(
+    //     Vec3::new(
+    //         WINDOW_WIDTH as f32 / 4.0,
+    //         3.0 * (WINDOW_HEIGHT as f32 / 4.0),
+    //         20.0,
+    //     ),
+    //     10.0,
+    //     ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
+    // ));
+    //
+    // scene.add_sphere(SphereData::new(
+    //     Vec3::new(
+    //         WINDOW_WIDTH as f32 / 3.0,
+    //         3.0 * (WINDOW_HEIGHT as f32 / 6.0),
+    //         30.0,
+    //     ),
+    //     25.0,
+    //     ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
+    // ));
 
     // Add triangles
     let mut plane_up = Vec3::unit_y();
     let mut plane_normal = -Vec3::unit_z();
-    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.45));
-    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.45));
+    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.325));
+    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.325));
 
     scene.add_triangle(TriangleData::with_material(
         Vec3::new(
-            WINDOW_WIDTH as f32 * 0.1,
-            WINDOW_HEIGHT as f32 * 0.25,
-            320.0,
+            WINDOW_WIDTH as f32 * 0.05,
+            WINDOW_HEIGHT as f32 * 0.2,
+            200.0,
         ),
+        Vec3::new(WINDOW_WIDTH as f32 * 0.3, WINDOW_HEIGHT as f32 * 0.5, 200.0),
         Vec3::new(
-            WINDOW_WIDTH as f32 * 0.35,
-            WINDOW_HEIGHT as f32 * 0.55,
-            320.0,
-        ),
-        Vec3::new(
-            WINDOW_WIDTH as f32 * 0.3,
+            WINDOW_WIDTH as f32 * 0.25,
             WINDOW_HEIGHT as f32 * 0.15,
-            320.0,
+            150.0,
         ),
         Material::new(ColorType::new(0.5, 0.7, 0.8), 0.5, 0.5),
+    ));
+
+    scene.add_triangle(TriangleData::with_material(
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.55,
+            WINDOW_HEIGHT as f32 * 0.45,
+            200.0,
+        ),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.7,
+            WINDOW_HEIGHT as f32 * 0.72,
+            200.0,
+        ),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.65,
+            WINDOW_HEIGHT as f32 * 0.35,
+            140.0,
+        ),
+        Material::new(ColorType::new(0.7, 0.7, 0.8), 0.1, 0.3),
     ));
 
     // Convert BoundedPlane to basic geometries and add them
     let plane_triangles = BoundedPlane::with_material(
         plane_normal,
-        Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, 270.0),
+        Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, 250.0),
         plane_up,
         WINDOW_WIDTH as f32 * 0.55,
         WINDOW_HEIGHT as f32 * 0.55,
@@ -187,6 +235,24 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     .to_basic_geometries();
 
     for triangle in plane_triangles {
+        scene.add_triangle(triangle);
+    }
+
+    let back_plane_triangle = BoundedPlane::with_material(
+        -Vec3::unit_z(),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.5,
+            WINDOW_HEIGHT as f32 * 0.5,
+            10000.0,
+        ),
+        Vec3::unit_y(),
+        WINDOW_WIDTH as f32 * 10.,
+        WINDOW_HEIGHT as f32 * 10.,
+        Material::new(ColorType::new(0.2, 0.2, 0.2), 0.5, 0.8),
+    )
+    .to_basic_geometries();
+
+    for triangle in back_plane_triangle {
         scene.add_triangle(triangle);
     }
 
@@ -221,14 +287,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let (colors, valid) = Self::get_pixel_color_vectorized(
             Vec3::new(x as f32, y as f32, 0.0),
             RENDER_RAY_DIRECTION,
-            SCENE
-                .scene_objects
-                .get_by_kind(RenderGeometryKind::Sphere)
-                .iter(),
-            SCENE
-                .scene_objects
-                .get_by_kind(RenderGeometryKind::Triangle)
-                .iter(),
+            &SCENE.scene_objects,
             LIGHTS.iter(),
         )?;
 
@@ -242,8 +301,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn get_pixel_color_vectorized<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl RenderGeometryIterator<'a, V>,
-        triangles: impl RenderGeometryIterator<'a, V>,
+        check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -259,17 +317,16 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let antialiasing = cfg!(feature = "anti_aliasing");
 
         if antialiasing {
-            Self::antialiased_raytrace(coords, unit_z, spheres, triangles, lights)
+            Self::antialiased_raytrace(coords, unit_z, check_objects, lights)
         } else {
-            Self::single_raytrace(coords, unit_z, spheres, triangles, lights)
+            Self::single_raytrace(coords, unit_z, check_objects, lights)
         }
     }
 
     fn single_raytrace<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl RenderGeometryIterator<'a, V>,
-        triangles: impl RenderGeometryIterator<'a, V>,
+        check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -280,110 +337,18 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
-        let ray = Ray::<V>::new_with_mask(
-            coords,
-            unit_z,
-            <V::Scalar as SimdValue>::SimdBool::splat(false),
-        );
+        let (ray, nearest_interaction) = Raytracer::cast_ray(coords, unit_z, check_objects)?;
 
-        // For SIMD rays, we process each geometry type separately and find the nearest
-        let mut nearest_interaction: Option<SurfaceInteraction<V>> = None;
+        let color =
+            Self::calculate_lighting(&nearest_interaction, ray.direction, check_objects, lights);
 
-        // todo maybe we can unify the following logic by storing geometry in a map structure that has as key a `GeometryKind` enum, and value a list of geometries
-        // Process spheres
-        for sphere in spheres {
-            // Create SIMD sphere
-            let sphere_simd = RenderGeometry::<V>::splat(sphere);
-
-            // Check intersection
-            if let Some(interaction) = sphere_simd.intersect(&ray) {
-                if interaction.valid_mask.none() {
-                    continue;
-                }
-
-                // Update nearest interaction
-                nearest_interaction = match nearest_interaction {
-                    None => Some(interaction),
-                    Some(ref current) => {
-                        let closer =
-                            interaction.distance.simd_le(current.distance) & interaction.valid_mask;
-
-                        if closer.none() {
-                            Some(SurfaceInteraction::blend(
-                                current.valid_mask,
-                                current,
-                                &interaction,
-                            ))
-                        } else if closer.all() {
-                            Some(interaction)
-                        } else {
-                            let pick_old_mask = (interaction.valid_mask & !current.valid_mask)
-                                | (interaction.valid_mask & current.valid_mask & closer);
-
-                            Some(SurfaceInteraction::blend(
-                                pick_old_mask,
-                                &interaction,
-                                current,
-                            ))
-                        }
-                    }
-                };
-            }
-        }
-
-        // Process triangles
-        for triangle in triangles {
-            // Create SIMD triangle
-            let triangle_simd = RenderGeometry::<V>::splat(triangle);
-
-            // Check intersection
-            if let Some(interaction) = triangle_simd.intersect(&ray) {
-                if interaction.valid_mask.none() {
-                    continue;
-                }
-
-                // Update nearest interaction
-                nearest_interaction = match nearest_interaction {
-                    None => Some(interaction),
-                    Some(ref current) => {
-                        let closer =
-                            interaction.distance.simd_le(current.distance) & interaction.valid_mask;
-
-                        if closer.none() {
-                            Some(SurfaceInteraction::blend(
-                                current.valid_mask,
-                                current,
-                                &interaction,
-                            ))
-                        } else if closer.all() {
-                            Some(interaction)
-                        } else {
-                            let pick_old_mask = (interaction.valid_mask & !current.valid_mask)
-                                | (interaction.valid_mask & current.valid_mask & closer);
-
-                            Some(SurfaceInteraction::blend(
-                                pick_old_mask,
-                                &interaction,
-                                current,
-                            ))
-                        }
-                    }
-                };
-            }
-        }
-
-        // If no intersection found, return None
-        let interaction = nearest_interaction?;
-
-        // Calculate lighting
-        let color = Self::calculate_lighting(&interaction, ray.direction, lights);
-
-        Some((color, interaction.valid_mask))
+        Some((color, nearest_interaction.valid_mask))
     }
 
     fn calculate_lighting<'a, V>(
         interaction: &SurfaceInteraction<V>,
         view_dir: V,
+        check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> ColorType<V::Scalar>
     where
@@ -413,15 +378,29 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         for light in lights {
             // Create SIMD light
             let light = PointLight::<V>::splat(&light);
-            let contribution =
-                light.calculate_contribution_at(interaction, interaction.point, view_dir);
-
             let light_position = light.position;
-            let light_color_simd = contribution.color;
-            let light_intensity = contribution.intensity;
 
             // Calculate light direction (from intersection point to light)
-            let light_dir = (light_position - interaction.point).normalized();
+            let light_to_point = (light_position - interaction.point);
+            let light_dir = light_to_point.normalized();
+
+            // fixme translucent objects?
+            let check_for_light_blocking_point = interaction.point
+                + ((interaction.point - light_position)
+                    * V::broadcast(<V as Vector>::Scalar::from_subset(&f32::EPSILON))); // move point a bit away from the surface of the object
+            let check_for_light_blocking_light_to_point =
+                check_for_light_blocking_point - light_position;
+            let light_can_reach_point = (!Raytracer::has_any_intersection(
+                check_for_light_blocking_light_to_point,
+                light_dir,
+                check_objects,
+                check_for_light_blocking_light_to_point.mag(),
+            )) & interaction.valid_mask;
+
+            let contribution =
+                light.calculate_contribution_at(interaction, interaction.point, view_dir);
+            let light_color_simd = contribution.color;
+            let light_intensity = contribution.intensity;
 
             // Calculate diffuse factor
             let diffuse_factor = interaction.normal.dot(light_dir).simd_max(zero);
@@ -442,7 +421,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             let light_factor = (diffuse_factor + specular) * light_intensity;
 
             // Only apply light where the surface faces the light
-            let light_valid = diffuse_factor.simd_gt(zero);
+            let light_valid = diffuse_factor.simd_gt(zero) & light_can_reach_point;
 
             // Add light contribution
             light_color = light_color
@@ -461,8 +440,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn antialiased_raytrace<'a, V>(
         coords: V,
         unit_z: V,
-        spheres: impl RenderGeometryIterator<'a, V>,
-        triangles: impl RenderGeometryIterator<'a, V>,
+        check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V>,
     ) -> Option<(
         ColorType<V::Scalar>,
@@ -489,8 +467,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 Self::single_raytrace(
                     coords + V::sample_random(),
                     unit_z,
-                    spheres.clone(),
-                    triangles.clone(),
+                    check_objects,
                     lights.clone(),
                 )
                 .map(|(c, m)| (c * scale, m))
@@ -523,14 +500,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 let Some((colors, valid_mask)) = Self::get_pixel_color_vectorized(
                     coords,
                     Vec3x8::unit_z(),
-                    SCENE
-                        .scene_objects
-                        .get_by_kind(RenderGeometryKind::Sphere)
-                        .iter(),
-                    SCENE
-                        .scene_objects
-                        .get_by_kind(RenderGeometryKind::Triangle)
-                        .iter(),
+                    &SCENE.scene_objects,
                     LIGHTS.iter(),
                 ) else {
                     return;

@@ -43,7 +43,7 @@ enumcapsulate = "0.6.2"
 assert_float_eq = "1.1"
 
 [features]
-default = ["anti_aliasing"]
+default = []
 simd_render = []
 simulate_slow_render = []
 render_timing_debug = ["incr_stats"]
