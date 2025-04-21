@@ -150,24 +150,19 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
             #[cfg(feature = "render_timing_debug")]
             let render_times = render_times.clone();
 
-            buffer
-                .par_chunks(Self::RENDER_STRIDE)
-                .enumerate()
-                .for_each(|(chunk_index, p)| {
+            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE, |chunk| {
+                // Cache-friendly approach: process row by row
+                chunk.process_rows(|y, _, set_pixel_value| {
                     #[cfg(feature = "render_timing_debug")]
                     let start = Instant::now();
 
-                    let chunk_offset = chunk_index * Self::RENDER_STRIDE;
+                    let z = vec![0.0f32; chunk.width()];
+                    let i = (0..chunk.width()).collect::<Vec<_>>();
 
-                    let indexes = (0..p.len()).map(|j| (j, chunk_offset + j));
-
-                    let (i, x, y): (Vec<_>, Vec<_>, Vec<_>) = indexes
-                        .map(|(j, pixel_offset)| {
-                            (j, (pixel_offset % W) as f32, (pixel_offset / W) as f32)
-                        })
+                    let (x, y): (Vec<_>, Vec<_>) = (0..chunk.width())
+                        .map(|x| chunk.global_coordinates(x, y))
+                        .map(|(x, y)| (x as f32, y as f32))
                         .collect();
-
-                    let z = vec![0.0f32; p.len()];
 
                     let coordinates = RenderCoordinatesVectorized {
                         i: &i,
@@ -177,7 +172,7 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
                     };
 
                     cb(coordinates, &|i, pixel| {
-                        p[i].store(C::to_output(&pixel), Ordering::Relaxed);
+                        set_pixel_value(i, C::to_output(&pixel));
 
                         if cfg!(feature = "simulate_slow_render") {
                             thread::sleep(Duration::from_micros(70));
@@ -189,6 +184,7 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
                         render_times.push(start.elapsed().as_secs_f64());
                     }
                 });
+            });
         }
 
         #[cfg(feature = "render_timing_debug")]
