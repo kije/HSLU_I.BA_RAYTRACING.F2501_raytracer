@@ -40,9 +40,15 @@ use ultraviolet::{Rotor3, Vec3, Vec3x8, f32x8};
 
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 
+const RAYTRACE_REFLECTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
+    18
+} else {
+    9
+};
+
 const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
     if cfg!(feature = "high_quality") {
-        13
+        14
     } else {
         6
     }
@@ -119,10 +125,14 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
     ));
 
-    scene.add_sphere(SphereData::new(
+    scene.add_sphere(SphereData::with_material(
         Vec3::new(WINDOW_WIDTH as f32 / 2.5, WINDOW_HEIGHT as f32 / 1.5, 170.0),
         70.0,
-        ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
+        Material::new(
+            ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
+            0.8,
+            0.0,
+        ),
     ));
 
     // scene.add_sphere(SphereData::new(
@@ -140,7 +150,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         88.0,
         Material::new(
             ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
-            0.01,
+            1.0,
             0.2,
         ),
     ));
@@ -254,7 +264,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         plane_up,
         WINDOW_WIDTH as f32 * 0.55,
         WINDOW_HEIGHT as f32 * 0.55,
-        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.05, 0.05),
+        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.95, 0.05),
     )
     .to_basic_geometries();
 
@@ -272,7 +282,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         Vec3::unit_y(),
         WINDOW_WIDTH as f32 * 10.,
         WINDOW_HEIGHT as f32 * 10.,
-        Material::new(ColorType::new(0.2, 0.2, 0.2), 0.5, 0.8),
+        Material::new(ColorType::new(0.2, 0.2, 0.2), 0.0, 0.8),
     )
     .to_basic_geometries();
 
@@ -326,13 +336,16 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         coords: V,
         unit_z: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
-        lights: impl SceneLightIterator<'a, V>,
+        lights: impl SceneLightIterator<'a, V> + Send + 'static,
     ) -> Option<(
         ColorType<V::Scalar>,
         <<V as Vector>::Scalar as SimdValue>::SimdBool,
     )>
     where
-        V: 'a + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
+        V: 'a
+            + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
+            + Send
+            + 'static,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
         [(); <V as Vector>::LANES]:,
@@ -343,7 +356,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         if antialiasing {
             Self::antialiased_raytrace(coords, unit_z, check_objects, lights)
         } else {
-            Self::single_raytrace::<false, _>(coords, unit_z, check_objects, lights)
+            Self::single_raytrace::<false, false, _>(coords, unit_z, check_objects, lights, None)
         }
     }
 
@@ -351,42 +364,184 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     ///
     /// `IS_ANTIALIASING_RAY` param may be set to true if the ray is used for antialiasing and might be used to skip complex calculations that are not relevant for antialiasing
     ///
-    fn single_raytrace<'a, const IS_ANTIALIASING_RAY: bool, V>(
+    fn single_raytrace<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
         coords: V,
         unit_z: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
-        lights: impl SceneLightIterator<'a, V>,
+        lights: impl SceneLightIterator<'a, V> + Send + 'static,
+        recursion_depth: Option<usize>,
     ) -> Option<(
         ColorType<V::Scalar>,
         <<V as Vector>::Scalar as SimdValue>::SimdBool,
     )>
     where
-        V: 'a + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
+        V: 'a
+            + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
+            + Send
+            + 'static,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
+        if let Some(recursion_depth) = recursion_depth {
+            if recursion_depth == 0 {
+                return None;
+            }
+        }
+        let zero = V::Scalar::zero();
+
         let (ray, nearest_interaction) =
             Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(coords, unit_z, check_objects)?;
 
-        let color =
-            Self::calculate_lighting(&nearest_interaction, ray.direction, check_objects, lights);
+        let color = Self::calculate_lighting::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
+            &nearest_interaction,
+            ray.direction,
+            check_objects,
+            lights.clone(),
+        );
 
-        Some((color, nearest_interaction.valid_mask))
+        let reflection_color = if cfg!(feature = "reflections") {
+            Self::calculate_reflection::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
+                &nearest_interaction,
+                ray.direction,
+                check_objects,
+                lights,
+                recursion_depth,
+            )
+        } else {
+            ColorType::new(zero, zero, zero)
+        };
+
+        Some((color + reflection_color, nearest_interaction.valid_mask))
     }
 
-    fn calculate_lighting<'a, V>(
+    fn calculate_reflection<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
         interaction: &SurfaceInteraction<V>,
         view_dir: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
-        lights: impl SceneLightIterator<'a, V>,
+        lights: impl SceneLightIterator<'a, V> + Send + 'static,
+        recursion_depth: Option<usize>,
     ) -> ColorType<V::Scalar>
     where
-        V: 'a + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
+        V: 'a
+            + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
+            + Send
+            + 'static,
+        ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        Standard: Distribution<<V as Vector>::Scalar>,
+    {
+        let zero = V::Scalar::zero();
+        let bool_false =
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false);
+
+        if interaction.valid_mask.none() {
+            return ColorType::new(zero, zero, zero);
+        }
+
+        let material_is_reflective = interaction.material.reflectivity.simd_gt(zero);
+
+        if material_is_reflective.none() {
+            return ColorType::new(zero, zero, zero);
+        }
+
+        macro_rules! impl_reflection_raytrace {
+            (
+                let $reflection_contribution:ident = $single_raytrace:ident(
+                    $interaction_point:expr,
+                    $light_dir:expr,
+                    $check_objects:expr,
+                    $lights:expr,
+                    $recursion_depth:expr,
+                ) $(if $condition:expr)?
+            ) => {
+                let $reflection_contribution = if cfg!(feature = "reflections") $( && $condition)?  {
+                    if IS_REFLECTION_RAY {
+                        impl_reflection_raytrace!(
+                            $single_raytrace,
+                            $interaction_point,
+                            $light_dir,
+                            $check_objects,
+                            $lights,
+                            $recursion_depth
+                        )
+                    } else {
+                        let lights = $lights.clone();
+                        let interaction_point = $interaction_point.clone();
+                        let check_objects = $check_objects.clone();
+                        let light_dir = $light_dir.clone();
+                        std::thread::spawn(move || {
+                            impl_reflection_raytrace!(
+                                $single_raytrace,
+                                interaction_point,
+                                light_dir,
+                                &check_objects,
+                                lights,
+                                $recursion_depth
+                            )
+                        })
+                        .join()
+                        .unwrap()
+                    }
+                } else {
+                    None
+                };
+            };
+            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr) => {
+                Self::$single_raytrace::<IS_ANTIALIASING_RAY, true, _>(
+                    $interaction_point,
+                    $light_dir,
+                    $check_objects,
+                    $lights,
+                    $recursion_depth
+                        .map(|d| d - 1)
+                        .or(Some(RAYTRACE_REFLECTION_MAX_DEPTH)),
+                )
+            };
+        }
+
+        let reflection_direction = view_dir.reflected(interaction.normal).normalized();
+
+        impl_reflection_raytrace! {
+            let reflection_color = single_raytrace(
+                (interaction.point + (reflection_direction * V::broadcast(<V as Vector>::Scalar::from_subset(&(1.5e-02_f32))))),
+                reflection_direction,
+                check_objects,
+                lights.clone(),
+                recursion_depth,
+            )
+        }
+
+        let (reflection, reflection_valid) =
+            reflection_color.unwrap_or((ColorType::<V::Scalar>::new(zero, zero, zero), bool_false));
+
+        let reflection_valid = reflection_valid & interaction.valid_mask & material_is_reflective;
+
+        ColorType::<V::Scalar>::blend(
+            reflection_valid,
+            &(reflection * interaction.material.reflectivity),
+            &ColorType::<V::Scalar>::new(zero, zero, zero),
+        )
+    }
+
+    fn calculate_lighting<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
+        interaction: &SurfaceInteraction<V>,
+        view_dir: V,
+        check_objects: &GeometryCollection<V::SingleValueVector>,
+        lights: impl SceneLightIterator<'a, V> + Send + 'static,
+    ) -> ColorType<V::Scalar>
+    where
+        V: 'a
+            + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
+            + Send
+            + 'static,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
+
+        if interaction.valid_mask.none() {
+            return ColorType::new(zero, zero, zero);
+        }
 
         // Create ambient light
         let ambient_light =
@@ -405,7 +560,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         // Calculate direct lighting from all point lights
         let mut light_color = ColorType::<V::Scalar>::new(zero, zero, zero);
 
-        for light in lights {
+        for light in lights.clone() {
             // Create SIMD light
             let light = PointLight::<V>::splat(&light);
 
@@ -439,9 +594,10 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
             // Calculate specular reflection
             let reflection = light_dir.reflected(interaction.normal);
+
             let specular_factor = reflection
                 .normalized()
-                .dot(view_dir.normalized())
+                .dot(view_dir)
                 .simd_max(zero)
                 .simd_powf(
                     (interaction.material.shininess * V::Scalar::from_subset(&(512.0)))
@@ -478,13 +634,16 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         coords: V,
         unit_z: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
-        lights: impl SceneLightIterator<'a, V>,
+        lights: impl SceneLightIterator<'a, V> + Send + 'static,
     ) -> Option<(
         ColorType<V::Scalar>,
         <<V as Vector>::Scalar as SimdValue>::SimdBool,
     )>
     where
-        V: 'a + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
+        V: 'a
+            + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
+            + Send
+            + 'static,
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
@@ -519,10 +678,15 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let default_color = ColorType::new(zero, zero, zero);
         let default_mask = bool_false;
-        let (initial_color, initial_mask) =
-            Self::single_raytrace::<false, _>(coords, unit_z, check_objects, lights.clone())
-                .map(|(c, m)| (c * scale, m))
-                .unwrap_or((default_color, default_mask));
+        let (initial_color, initial_mask) = Self::single_raytrace::<false, false, _>(
+            coords,
+            unit_z,
+            check_objects,
+            lights.clone(),
+            None,
+        )
+        .map(|(c, m)| (c * scale, m))
+        .unwrap_or((default_color, default_mask));
 
         // fixme: maybe reordering the rays here so that 1 simd ray represents the different samples of the antialiasing for the same "real" pixel, because they cohere better, instead of the rays of independent "real" pixels.
         // Sample multiple rays and average the results
@@ -531,11 +695,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             .filter_map(|i| {
                 let sampling_direction_bias = directions[i % directions.len()];
                 let random_vec = V::sample_random() * sampling_direction_bias;
-                let (c, m) = Self::single_raytrace::<true, _>(
+                let (c, m) = Self::single_raytrace::<true, false, _>(
                     coords + (random_vec * sample_radius),
                     unit_z,
                     check_objects,
                     lights.clone(),
+                    None,
                 )?;
                 Some((c * scale, m))
             })

@@ -27,13 +27,21 @@ pub mod vector_traits;
 pub const CONFIGURED_WINDOW_WIDTH: usize = if cfg!(feature = "high_resolution") {
     1620
 } else {
-    768
+    if cfg!(feature = "medium_resolution") {
+        1100
+    } else {
+        768
+    }
 };
 
 pub const CONFIGURED_WINDOW_HEIGHT: usize = if cfg!(feature = "high_resolution") {
     1280
 } else {
-    640
+    if cfg!(feature = "medium_resolution") {
+        830
+    } else {
+        640
+    }
 };
 
 pub const WINDOW_WIDTH: usize = match option_env!("WINDOW_WIDTH") {

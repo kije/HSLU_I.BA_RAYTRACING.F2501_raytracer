@@ -42,14 +42,18 @@ enumcapsulate = "0.6.2"
 assert_float_eq = "1.1"
 
 [features]
-default = ["anti_aliasing", "soft_shadows"]
+# default = ["high_quality", "realistic", "anti_aliasing", "medium_resolution"]
+default = ["realistic", "anti_aliasing", "medium_resolution"]
 simd_render = []
 simulate_slow_render = []
 render_timing_debug = ["incr_stats"]
 anti_aliasing = []
 high_resolution = []
+medium_resolution = []
 soft_shadows = []
-high_quality = ["anti_aliasing", "high_resolution", "soft_shadows"]
+reflections = []
+realistic = ["reflections", "soft_shadows"]
+high_quality = ["anti_aliasing"]
 
 [patch.crates-io]
 simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support"] }

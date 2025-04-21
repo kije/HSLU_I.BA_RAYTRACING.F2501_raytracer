@@ -88,6 +88,7 @@ impl<V> BasicGeometry<V> for RenderGeometry<V> where
 }
 
 /// A collection of geometries organized by kind for efficient access
+#[derive(Debug, Clone)]
 pub struct GeometryCollection<V: Vector> {
     geometries: HashMap<RenderGeometryKind, Vec<RenderGeometry<V>>>,
 }
