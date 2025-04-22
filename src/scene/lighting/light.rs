@@ -1,26 +1,25 @@
 use crate::color::{ColorSimdExt, maximize_value};
 use crate::color_traits::LightCompatibleColor;
 use crate::helpers::{ColorType, Splatable};
-use crate::scalar_traits::LightScalar;
 use crate::scene::lighting::Lightable;
+use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{SimdCapableVector, Vector, VectorAware};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use itertools::Itertools;
 use num_traits::{One, Zero};
 use palette::bool_mask::BoolMask;
-use palette::{Hsv, IntoColor, Srgb};
 use rand::distributions::{Distribution, Standard};
 use simba::scalar::SupersetOf;
 use simba::simd::{SimdPartialOrd, SimdValue};
 
 #[derive(Debug, Copy, Clone)]
-pub struct LightContribution<S: LightScalar> {
+pub struct LightContribution<S: SimdValueRealSimplified> {
     pub color: ColorType<S>,
     pub intensity: S,
     pub valid_mask: S::SimdBool,
 }
 
-impl<S: LightScalar> LightContribution<S> {
+impl<S: SimdValueRealSimplified> LightContribution<S> {
     pub const fn new(color: ColorType<S>, intensity: S, valid_mask: S::SimdBool) -> Self {
         Self {
             color,
@@ -30,7 +29,7 @@ impl<S: LightScalar> LightContribution<S> {
     }
 }
 
-impl<S: LightScalar> palette::num::Zero for LightContribution<S> {
+impl<S: SimdValueRealSimplified> palette::num::Zero for LightContribution<S> {
     #[inline]
     fn zero() -> Self {
         Self {
@@ -45,7 +44,7 @@ impl<S: LightScalar> palette::num::Zero for LightContribution<S> {
     }
 }
 
-impl<S: LightScalar> Default for LightContribution<S>
+impl<S: SimdValueRealSimplified> Default for LightContribution<S>
 where
     Self: palette::num::Zero,
 {
@@ -185,7 +184,7 @@ where
         let cloud_radius = V::broadcast(V::Scalar::from_subset(&(1.35 + (N as f32 / 80.0))));
 
         (0..N)
-            .map(|i| {
+            .map(|_| {
                 let mut l = self.clone();
 
                 l.position = l.position + (V::sample_random() * cloud_radius);
@@ -224,7 +223,7 @@ where
     }
 }
 
-impl<V: RenderingVector<Scalar: LightScalar>> VectorAware<V> for PointLight<V> {}
+impl<V: RenderingVector<Scalar: SimdValueRealSimplified>> VectorAware<V> for PointLight<V> {}
 
 impl<V> Light<V> for PointLight<V>
 where

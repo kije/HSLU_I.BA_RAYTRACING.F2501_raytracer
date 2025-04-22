@@ -1,5 +1,5 @@
 use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
-use crate::scalar_traits::LightScalar;
+use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{
     NormalizableVector, ReflectableVector, SimdCapableVector, Vector, Vector3DAccessor,
     Vector3DOperations, VectorAssociations, VectorOperations,
@@ -32,7 +32,7 @@ impl<V> BaseVector for V where
 
 /// A trait for vectors with common operations for rendering
 pub trait RenderingVector:
-    BaseVector<Scalar: LightScalar>
+    BaseVector<Scalar: SimdValueRealSimplified>
     + NormalizableVector
     + ReflectableVector
     + Vector3DOperations
@@ -44,7 +44,7 @@ pub trait RenderingVector:
 
 // Blanket implementation
 impl<V> RenderingVector for V where
-    V: BaseVector<Scalar: LightScalar>
+    V: BaseVector<Scalar: SimdValueRealSimplified>
         + NormalizableVector
         + ReflectableVector
         + Vector3DOperations

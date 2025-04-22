@@ -16,15 +16,13 @@ use crate::vector::{NormalizableVector, Vector};
 
 use crate::color::ColorSimdExt;
 use crate::geometry::{
-    BoundedPlane, CompositeGeometry, GeometryCollection, Ray, RenderGeometry, RenderGeometryKind,
-    SphereData, TriangleData,
+    BoundedPlane, CompositeGeometry, GeometryCollection, SphereData, TriangleData,
 };
 use crate::raytracing::Material;
+use crate::raytracing::Raytracer;
 use crate::raytracing::SurfaceInteraction;
-use crate::raytracing::{Intersectable, Raytracer};
 use crate::scene::{AmbientLight, Light, PointLight, Scene};
 use num_traits::{One, Zero};
-use palette::Srgb;
 use palette::bool_mask::BoolMask;
 use rand::distributions::{Distribution, Standard};
 use rayon::iter::IntoParallelIterator;
@@ -33,13 +31,10 @@ use simba::simd::{SimdBool, SimdPartialOrd, SimdValue};
 use std::fmt::Debug;
 use std::hint::{likely, unlikely};
 use std::marker::PhantomData;
-use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::LazyLock;
 use ultraviolet::{Rotor3, Vec3, Vec3x8, f32x8};
 
 const SCENE_DEPTH: f32 = 1000.0;
-static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
 static RENDER_RAY_FOCUS: Vec3 = Vec3::new(
     WINDOW_WIDTH as f32 / 2.0,
     WINDOW_HEIGHT as f32 / 2.0,
@@ -62,97 +57,96 @@ const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
     1
 };
 
-static LIGHTS: LazyLock<[PointLight<Vec3>; { POINT_LIGHT_MULTIPLICATOR * 7 }]> =
-    LazyLock::new(|| {
-        [
-            PointLight::new(
-                Vec3::new(
-                    WINDOW_WIDTH as f32 / 2.0,
-                    WINDOW_HEIGHT as f32 / 1.8,
-                    0.016 * SCENE_DEPTH,
-                ),
-                ColorType::new(0.825, 0.675, 0.5),
-                0.15,
+static LIGHTS: LazyLock<[PointLight<Vec3>; POINT_LIGHT_MULTIPLICATOR * 7]> = LazyLock::new(|| {
+    [
+        PointLight::new(
+            Vec3::new(
+                WINDOW_WIDTH as f32 / 2.0,
+                WINDOW_HEIGHT as f32 / 1.8,
+                0.016 * SCENE_DEPTH,
             ),
-            PointLight::new(
-                Vec3::new(
-                    WINDOW_WIDTH as f32 / 3.5,
-                    WINDOW_HEIGHT as f32 / 3.75,
-                    0.025 * SCENE_DEPTH,
-                ),
-                ColorType::new(0.822, 0.675, 0.45),
-                0.75,
+            ColorType::new(0.825, 0.675, 0.5),
+            0.15,
+        ),
+        PointLight::new(
+            Vec3::new(
+                WINDOW_WIDTH as f32 / 3.5,
+                WINDOW_HEIGHT as f32 / 3.75,
+                0.025 * SCENE_DEPTH,
             ),
-            // PointLight::new(
-            //     Vec3::new(
-            //         WINDOW_WIDTH as f32 / 1.22,
-            //         WINDOW_HEIGHT as f32 / 2.9,
-            //         0.38 * SCENE_DEPTH,
-            //     ),
-            //     ColorType::new(0.78, 0.67, 0.45),
-            //     0.7,
-            // ),
-            PointLight::new(
-                Vec3::new(
-                    WINDOW_WIDTH as f32 - 80.0,
-                    WINDOW_HEIGHT as f32 / 2.0,
-                    0.125 * SCENE_DEPTH,
-                ),
-                ColorType::new(1.0, 1.0, 1.0),
-                0.2,
+            ColorType::new(0.822, 0.675, 0.45),
+            0.75,
+        ),
+        // PointLight::new(
+        //     Vec3::new(
+        //         WINDOW_WIDTH as f32 / 1.22,
+        //         WINDOW_HEIGHT as f32 / 2.9,
+        //         0.38 * SCENE_DEPTH,
+        //     ),
+        //     ColorType::new(0.78, 0.67, 0.45),
+        //     0.7,
+        // ),
+        PointLight::new(
+            Vec3::new(
+                WINDOW_WIDTH as f32 - 80.0,
+                WINDOW_HEIGHT as f32 / 2.0,
+                0.125 * SCENE_DEPTH,
             ),
-            PointLight::new(
-                Vec3::new(
-                    (WINDOW_WIDTH as f32 / 2.5),
-                    (WINDOW_HEIGHT / 5) as f32,
-                    0.175 * SCENE_DEPTH,
-                ),
-                ColorType::new(0.75, 0.56, 0.65),
-                0.45,
+            ColorType::new(1.0, 1.0, 1.0),
+            0.2,
+        ),
+        PointLight::new(
+            Vec3::new(
+                WINDOW_WIDTH as f32 / 2.5,
+                (WINDOW_HEIGHT / 5) as f32,
+                0.175 * SCENE_DEPTH,
             ),
-            // PointLight::new(
-            //     Vec3::new(
-            //         (WINDOW_WIDTH / 2) as f32,
-            //         (WINDOW_HEIGHT / 2) as f32,
-            //         0.7 * SCENE_DEPTH,
-            //     ),
-            //     ColorType::new(1.0, 1.0, 1.0),
-            //     1.0,
-            // ),
-            PointLight::new(
-                Vec3::new(
-                    (WINDOW_WIDTH / 4) as f32,
-                    (WINDOW_HEIGHT / 6) as f32,
-                    0.01 * SCENE_DEPTH,
-                ),
-                ColorType::new(0.01, 0.5, 0.4),
-                0.2,
+            ColorType::new(0.75, 0.56, 0.65),
+            0.45,
+        ),
+        // PointLight::new(
+        //     Vec3::new(
+        //         (WINDOW_WIDTH / 2) as f32,
+        //         (WINDOW_HEIGHT / 2) as f32,
+        //         0.7 * SCENE_DEPTH,
+        //     ),
+        //     ColorType::new(1.0, 1.0, 1.0),
+        //     1.0,
+        // ),
+        PointLight::new(
+            Vec3::new(
+                (WINDOW_WIDTH / 4) as f32,
+                (WINDOW_HEIGHT / 6) as f32,
+                0.01 * SCENE_DEPTH,
             ),
-            PointLight::new(
-                Vec3::new(
-                    (WINDOW_WIDTH as f32) / 1.25,
-                    (WINDOW_HEIGHT / 3) as f32,
-                    0.09 * SCENE_DEPTH,
-                ),
-                ColorType::new(0.65, 0.2, 0.35),
-                0.2,
+            ColorType::new(0.01, 0.5, 0.4),
+            0.2,
+        ),
+        PointLight::new(
+            Vec3::new(
+                (WINDOW_WIDTH as f32) / 1.25,
+                (WINDOW_HEIGHT / 3) as f32,
+                0.09 * SCENE_DEPTH,
             ),
-            PointLight::new(
-                Vec3::new(
-                    (WINDOW_WIDTH as f32) / 2.0,
-                    WINDOW_HEIGHT as f32 / 1.2,
-                    0.12 * SCENE_DEPTH,
-                ),
-                ColorType::new(0.5, 0.51, 0.5),
-                0.3,
+            ColorType::new(0.65, 0.2, 0.35),
+            0.2,
+        ),
+        PointLight::new(
+            Vec3::new(
+                (WINDOW_WIDTH as f32) / 2.0,
+                WINDOW_HEIGHT as f32 / 1.2,
+                0.12 * SCENE_DEPTH,
             ),
-        ]
-        .map(|light| light.to_point_light_cloud::<{ POINT_LIGHT_MULTIPLICATOR }>())
-        .into_iter()
-        .flatten()
-        .collect_array::<{ POINT_LIGHT_MULTIPLICATOR * 7 }>()
-        .unwrap()
-    });
+            ColorType::new(0.5, 0.51, 0.5),
+            0.3,
+        ),
+    ]
+    .map(|light| light.to_point_light_cloud::<{ POINT_LIGHT_MULTIPLICATOR }>())
+    .into_iter()
+    .flatten()
+    .collect_array::<{ POINT_LIGHT_MULTIPLICATOR * 7 }>()
+    .unwrap()
+});
 
 // Create a lazy-initialized GeometryCollection
 static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
@@ -392,16 +386,6 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
 
     scene
 });
-
-trait RenderGeometryIterator<'a, V: 'a + SimdRenderingVector>:
-    IntoIterator<Item = &'a RenderGeometry<V::SingleValueVector>> + Clone + Sync
-{
-}
-
-impl<'a, T, V: 'a + SimdRenderingVector> RenderGeometryIterator<'a, V> for T where
-    T: IntoIterator<Item = &'a RenderGeometry<V::SingleValueVector>> + Clone + Sync
-{
-}
 
 trait SceneLightIterator<'a, V: 'a + SimdRenderingVector>:
     IntoIterator<Item = &'a PointLight<V::SingleValueVector>> + Clone + Sync
@@ -667,7 +651,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             let light_position = light.position;
 
             // Calculate light direction (from intersection point to light)
-            let light_to_point = (light_position - interaction.point);
+            let light_to_point = light_position - interaction.point;
             let light_dir = light_to_point.normalized();
 
             // fixme translucent objects?

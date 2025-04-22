@@ -1,7 +1,6 @@
 use crate::color::ColorSimdExt;
 use crate::helpers::{ColorType, Splatable};
 use crate::simd_compat::SimdValueSimplified;
-use num_traits::{One, Zero};
 use simba::simd::SimdValue;
 
 /// Surface material properties

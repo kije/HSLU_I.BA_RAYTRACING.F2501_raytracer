@@ -2,11 +2,9 @@ use crate::helpers::Splatable;
 use crate::matrix::Matrix;
 use crate::scalar::Scalar;
 use crate::simd_compat::SimdValueSimplified;
-use itertools::Position::Last;
 use simba::scalar::SupersetOf;
 use simba::simd::{SimdValue, WideF32x4, WideF32x8};
 use std::fmt::Debug;
-use std::ops::{Add, Deref, Mul};
 use tt_call::tt_if;
 use tt_equal::tt_equal;
 use ultraviolet::{

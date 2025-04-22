@@ -1,7 +1,6 @@
-use crate::geometry::{GeometryCollection, Ray};
+use crate::geometry::GeometryCollection;
 use crate::geometry::{SphereData, TriangleData};
 use crate::vector::Vector;
-use crate::vector_traits::RenderingVector;
 
 pub struct Scene<V: Vector> {
     pub scene_objects: GeometryCollection<V>,

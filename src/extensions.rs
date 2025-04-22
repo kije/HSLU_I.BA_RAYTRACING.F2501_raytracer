@@ -1,6 +1,5 @@
 use crate::helpers::ColorType;
 use itertools::{Itertools, izip};
-use palette::Srgb;
 use palette::num::One;
 use simba::simd::{WideBoolF32x4, WideBoolF32x8, WideF32x4, WideF32x8};
 use ultraviolet::{m32x4, m32x8};

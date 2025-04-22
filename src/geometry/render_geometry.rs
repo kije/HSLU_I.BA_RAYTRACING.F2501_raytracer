@@ -2,10 +2,8 @@ use crate::geometry::Ray;
 use crate::geometry::basic::{BasicGeometry, sphere::SphereData, triangle::TriangleData};
 use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
 use crate::raytracing::{Intersectable, Material, SurfaceInteraction};
-use crate::vector::{
-    NormalizableVector, SimdCapableVector, Vector, Vector3DAccessor, VectorAssociations,
-};
-use crate::vector_traits::{RenderingVector, SimdRenderingVector};
+use crate::vector::{SimdCapableVector, Vector, Vector3DAccessor, VectorAssociations};
+use crate::vector_traits::SimdRenderingVector;
 
 use crate::helpers::Splatable;
 use enumcapsulate::{Encapsulate, VariantDiscriminant};

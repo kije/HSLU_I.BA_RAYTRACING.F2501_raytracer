@@ -5,7 +5,7 @@ use palette::bool_mask::{BitOps, BoolMask, HasBoolMask, LazySelect, Select};
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdBool, SimdPartialOrd, SimdRealField, SimdSigned, SimdValue};
 use std::fmt::Debug;
-use std::ops::{BitAnd, BitXor, Neg};
+use std::ops::Neg;
 
 pub trait SimdValueBoolExt: SimdValue<SimdBool: SimdValue<Element = bool>> {
     fn create_mask(mask: <Self::SimdBool as SimdValue>::Element) -> Self::SimdBool;

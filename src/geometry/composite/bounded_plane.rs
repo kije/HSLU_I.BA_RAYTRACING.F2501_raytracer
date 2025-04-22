@@ -2,14 +2,12 @@ use crate::geometry::TriangleData;
 use crate::geometry::composite::CompositeGeometry;
 use crate::helpers::ColorType;
 use crate::raytracing::Material;
-use crate::vector::{
-    NormalizableVector, Vector, Vector3DOperations, VectorFixedDimensions, VectorOperations,
-};
+use crate::vector::{Vector, VectorFixedDimensions};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use num_traits::Zero;
 use simba::scalar::SupersetOf;
 use simba::simd::SimdBool;
-use simba::simd::{SimdPartialOrd, SimdValue};
+use simba::simd::SimdPartialOrd;
 
 pub struct BoundedPlane<V: Vector> {
     center: V,

@@ -1,4 +1,3 @@
-use crate::color::ColorSimdExt;
 use crate::helpers::ColorType;
 use crate::raytracing::material::Material;
 use crate::scene::Lightable;

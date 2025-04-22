@@ -1,14 +1,11 @@
 use crate::geometry::{GeometryCollection, Ray, RenderGeometry};
 use crate::helpers::Splatable;
 use crate::raytracing::{Intersectable, SurfaceInteraction};
-use crate::vector::{NormalizableVector, SimdCapableVector, Vector};
+use crate::vector::{NormalizableVector, Vector};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use num_traits::Zero;
 use simba::simd::SimdPartialOrd;
 use simba::simd::{SimdBool, SimdValue};
-
-pub type SingleValueVectorScalar<V> =
-    <<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar;
 
 pub struct Raytracer;
 

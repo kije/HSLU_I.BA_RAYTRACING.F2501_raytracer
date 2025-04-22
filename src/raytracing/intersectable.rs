@@ -1,7 +1,6 @@
 use crate::geometry::Ray;
 use crate::raytracing::surface_interaction::SurfaceInteraction;
 use crate::vector::Vector;
-use simba::simd::SimdValue;
 /// Trait for objects that can be intersected by rays
 pub trait Intersectable<V: Vector> {
     /// Check if a ray intersects this object and return surface interaction

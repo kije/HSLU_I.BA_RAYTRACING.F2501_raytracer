@@ -20,7 +20,6 @@ pub mod vector;
 // New modules for trait simplification
 pub mod color_traits;
 pub mod matrix;
-pub mod scalar_traits;
 pub mod simd_compat;
 pub mod vector_traits;
 

@@ -1,4 +1,4 @@
-use crate::vector::{Vector, VectorFixedDimensions};
+use crate::vector::Vector;
 use itertools::Itertools;
 use std::fmt::Debug;
 use std::ops::{Add, Mul};
