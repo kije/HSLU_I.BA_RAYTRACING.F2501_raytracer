@@ -578,12 +578,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
             // fixme translucent objects?
             let check_for_light_blocking_point = interaction.point
-                + ((interaction.point - light_position)
-                    * V::broadcast(<V as Vector>::Scalar::from_subset(&f32::EPSILON))); // move point a bit away from the surface of the object
+                + (light_dir * V::broadcast(<V as Vector>::Scalar::from_subset(&1.0e-03_f32))); // move point a bit away from the surface of the object
             let check_for_light_blocking_light_to_point =
-                check_for_light_blocking_point - light_position;
+                light_position - check_for_light_blocking_point;
             let light_can_reach_point = (!Raytracer::has_any_intersection(
-                check_for_light_blocking_light_to_point,
+                check_for_light_blocking_point,
                 light_dir,
                 check_objects,
                 check_for_light_blocking_light_to_point.mag(),
