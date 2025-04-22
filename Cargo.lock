@@ -595,7 +595,7 @@ dependencies = [
 [[package]]
 name = "palette"
 version = "0.7.6"
-source = "git+https://github.com/kije/palette.git#32a6dc543cf697a6d7a52b1b05a9275b2476678b"
+source = "git+https://github.com/kije/palette.git#9553b20fba7609b771b75aa01a85724606175afe"
 dependencies = [
  "approx",
  "palette_derive",
@@ -607,7 +607,7 @@ dependencies = [
 [[package]]
 name = "palette_derive"
 version = "0.7.6"
-source = "git+https://github.com/kije/palette.git#32a6dc543cf697a6d7a52b1b05a9275b2476678b"
+source = "git+https://github.com/kije/palette.git#9553b20fba7609b771b75aa01a85724606175afe"
 dependencies = [
  "by_address",
  "proc-macro2",
@@ -924,7 +924,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 [[package]]
 name = "simba"
 version = "0.9.0"
-source = "git+https://github.com/kije/simba.git#f998d2dd0a915c22cc807671b5415acadea10d51"
+source = "git+https://github.com/kije/simba.git#e2c4cb9424316eab4a3d3ed4f73243373e10dd32"
 dependencies = [
  "approx",
  "cordic",

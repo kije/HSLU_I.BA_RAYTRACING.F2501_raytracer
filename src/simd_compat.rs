@@ -1,11 +1,11 @@
 use crate::helpers::Splatable;
 use crate::scalar::Scalar;
 use num_traits::{Float, FromPrimitive, Num, NumAssignOps, NumOps, One, Zero};
-use palette::bool_mask::{BoolMask, HasBoolMask, LazySelect, Select};
+use palette::bool_mask::{BitOps, BoolMask, HasBoolMask, LazySelect, Select};
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::{SimdBool, SimdPartialOrd, SimdRealField, SimdSigned, SimdValue};
 use std::fmt::Debug;
-use std::ops::Neg;
+use std::ops::{BitAnd, BitXor, Neg};
 
 pub trait SimdValueBoolExt: SimdValue<SimdBool: SimdValue<Element = bool>> {
     fn create_mask(mask: <Self::SimdBool as SimdValue>::Element) -> Self::SimdBool;
@@ -96,7 +96,7 @@ impl<V> SimdValueSignedSimplified for V where
 }
 
 pub trait SimdValueRealSimplified:
-    SimdValueSignedSimplified<Element: Float>
+    SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
     + SimdRealField
     + palette::num::Real
     + palette::num::Sqrt
@@ -107,11 +107,17 @@ pub trait SimdValueRealSimplified:
     + palette::num::Abs
     + palette::num::PartialCmp
     + palette::num::MinMax
+    + palette::num::MulSub
+    + palette::num::MulAdd
+    + palette::num::Powf
+    + palette::num::Round
+    + palette::angle::RealAngle
+    + palette::angle::UnsignedAngle
 {
 }
 
 impl<V> SimdValueRealSimplified for V where
-    V: SimdValueSignedSimplified<Element: Float>
+    V: SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
         + SimdRealField
         + palette::num::Real
         + palette::num::Sqrt
@@ -122,5 +128,11 @@ impl<V> SimdValueRealSimplified for V where
         + palette::num::Abs
         + palette::num::PartialCmp
         + palette::num::MinMax
+        + palette::num::MulSub
+        + palette::num::MulAdd
+        + palette::num::Powf
+        + palette::num::Round
+        + palette::angle::RealAngle
+        + palette::angle::UnsignedAngle
 {
 }

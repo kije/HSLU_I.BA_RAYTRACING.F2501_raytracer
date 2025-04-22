@@ -1,4 +1,4 @@
-use crate::color::ColorSimdExt;
+use crate::color::{ColorSimdExt, maximize_value};
 use crate::color_traits::LightCompatibleColor;
 use crate::helpers::{ColorType, Splatable};
 use crate::scalar_traits::LightScalar;
@@ -8,6 +8,7 @@ use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use itertools::Itertools;
 use num_traits::{One, Zero};
 use palette::bool_mask::BoolMask;
+use palette::{Hsv, IntoColor, Srgb};
 use rand::distributions::{Distribution, Standard};
 use simba::scalar::SupersetOf;
 use simba::simd::{SimdPartialOrd, SimdValue};
@@ -82,8 +83,11 @@ impl<V> AmbientLight<V>
 where
     V: RenderingVector,
 {
-    pub const fn new(color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
-        Self { color, intensity }
+    pub fn new(color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
+        Self {
+            color: maximize_value(color),
+            intensity,
+        }
     }
 }
 
@@ -161,10 +165,10 @@ impl<V> PointLight<V>
 where
     V: RenderingVector,
 {
-    pub const fn new(position: V, color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
+    pub fn new(position: V, color: ColorType<V::Scalar>, intensity: V::Scalar) -> Self {
         Self {
             position,
-            color,
+            color: maximize_value(color),
             intensity,
         }
     }

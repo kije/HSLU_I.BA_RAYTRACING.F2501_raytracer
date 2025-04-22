@@ -66,47 +66,85 @@ static LIGHTS: LazyLock<[PointLight<Vec3>; { POINT_LIGHT_MULTIPLICATOR * 7 }]> =
     LazyLock::new(|| {
         [
             PointLight::new(
-                Vec3::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.1, 20.0),
-                ColorType::new(0.822, 0.675, 0.45),
-                0.25,
+                Vec3::new(
+                    WINDOW_WIDTH as f32 / 2.0,
+                    WINDOW_HEIGHT as f32 / 1.8,
+                    0.016 * SCENE_DEPTH,
+                ),
+                ColorType::new(0.825, 0.675, 0.5),
+                0.15,
             ),
             PointLight::new(
-                Vec3::new(WINDOW_WIDTH as f32 / 3.5, WINDOW_HEIGHT as f32 / 3.5, 55.0),
+                Vec3::new(
+                    WINDOW_WIDTH as f32 / 3.5,
+                    WINDOW_HEIGHT as f32 / 3.75,
+                    0.025 * SCENE_DEPTH,
+                ),
                 ColorType::new(0.822, 0.675, 0.45),
-                1.0,
+                0.75,
             ),
+            // PointLight::new(
+            //     Vec3::new(
+            //         WINDOW_WIDTH as f32 / 1.22,
+            //         WINDOW_HEIGHT as f32 / 2.9,
+            //         0.38 * SCENE_DEPTH,
+            //     ),
+            //     ColorType::new(0.78, 0.67, 0.45),
+            //     0.7,
+            // ),
             PointLight::new(
-                Vec3::new(WINDOW_WIDTH as f32, WINDOW_HEIGHT as f32 / 2.5, 150.0),
+                Vec3::new(
+                    WINDOW_WIDTH as f32 - 80.0,
+                    WINDOW_HEIGHT as f32 / 2.0,
+                    0.125 * SCENE_DEPTH,
+                ),
                 ColorType::new(1.0, 1.0, 1.0),
-                0.85,
+                0.2,
             ),
             PointLight::new(
-                Vec3::new((WINDOW_WIDTH / 2) as f32, (WINDOW_HEIGHT / 6) as f32, 60.0),
-                ColorType::new(0.75, 0.56, 0.5),
-                0.5,
+                Vec3::new(
+                    (WINDOW_WIDTH as f32 / 2.5),
+                    (WINDOW_HEIGHT / 5) as f32,
+                    0.175 * SCENE_DEPTH,
+                ),
+                ColorType::new(0.75, 0.56, 0.65),
+                0.45,
             ),
+            // PointLight::new(
+            //     Vec3::new(
+            //         (WINDOW_WIDTH / 2) as f32,
+            //         (WINDOW_HEIGHT / 2) as f32,
+            //         0.7 * SCENE_DEPTH,
+            //     ),
+            //     ColorType::new(1.0, 1.0, 1.0),
+            //     1.0,
+            // ),
             PointLight::new(
-                Vec3::new((WINDOW_WIDTH / 4) as f32, (WINDOW_HEIGHT / 6) as f32, 10.0),
-                ColorType::new(0.0, 0.5, 0.4),
-                0.3,
+                Vec3::new(
+                    (WINDOW_WIDTH / 4) as f32,
+                    (WINDOW_HEIGHT / 6) as f32,
+                    0.01 * SCENE_DEPTH,
+                ),
+                ColorType::new(0.01, 0.5, 0.4),
+                0.2,
             ),
             PointLight::new(
                 Vec3::new(
                     (WINDOW_WIDTH as f32) / 1.25,
                     (WINDOW_HEIGHT / 3) as f32,
-                    80.0,
+                    0.09 * SCENE_DEPTH,
                 ),
-                ColorType::new(0.6, 0.2, 0.3),
-                0.35,
+                ColorType::new(0.65, 0.2, 0.35),
+                0.2,
             ),
             PointLight::new(
                 Vec3::new(
                     (WINDOW_WIDTH as f32) / 2.0,
-                    WINDOW_HEIGHT as f32 / 1.1,
-                    140.0,
+                    WINDOW_HEIGHT as f32 / 1.2,
+                    0.12 * SCENE_DEPTH,
                 ),
-                ColorType::new(0.5, 0.5, 0.5),
-                0.6,
+                ColorType::new(0.5, 0.51, 0.5),
+                0.3,
             ),
         ]
         .map(|light| light.to_point_light_cloud::<{ POINT_LIGHT_MULTIPLICATOR }>())
@@ -226,8 +264,8 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     // Add triangles
     let mut plane_up = Vec3::unit_y();
     let mut plane_normal = -Vec3::unit_z();
-    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.325));
-    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.325));
+    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.355));
+    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.355));
 
     scene.add_triangle(TriangleData::with_material(
         Vec3::new(
@@ -241,7 +279,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             WINDOW_HEIGHT as f32 * 0.15,
             150.0,
         ),
-        Material::new(ColorType::new(0.5, 0.7, 0.8), 0.5, 0.5),
+        Material::new(ColorType::new(0.5, 0.7, 0.8), 0.25, 0.5),
     ));
 
     scene.add_triangle(TriangleData::with_material(
@@ -270,7 +308,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         plane_up,
         WINDOW_WIDTH as f32 * 0.55,
         WINDOW_HEIGHT as f32 * 0.55,
-        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.95, 0.05),
+        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.24, 0.05),
     )
     .to_basic_geometries();
 
@@ -283,17 +321,73 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         Vec3::new(
             WINDOW_WIDTH as f32 * 0.5,
             WINDOW_HEIGHT as f32 * 0.5,
-            10000.0,
+            SCENE_DEPTH,
         ),
         Vec3::unit_y(),
-        WINDOW_WIDTH as f32 * 10.,
-        WINDOW_HEIGHT as f32 * 10.,
-        Material::new(ColorType::new(0.2, 0.2, 0.2), 0.0, 0.8),
+        WINDOW_WIDTH as f32,
+        WINDOW_HEIGHT as f32,
+        Material::new(ColorType::new(0.5, 0.75, 0.75), 0.0, 0.0),
     )
     .to_basic_geometries();
 
-    for triangle in back_plane_triangle {
-        scene.add_triangle(triangle);
+    let bottom_plane_triangle = BoundedPlane::with_material(
+        Vec3::unit_y(),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.5,
+            WINDOW_HEIGHT as f32,
+            SCENE_DEPTH as f32 * 0.5,
+        ),
+        Vec3::unit_z(),
+        WINDOW_WIDTH as f32,
+        SCENE_DEPTH - 1.0,
+        Material::new(ColorType::new(0.75, 0.5, 0.75), 0.0, 0.0),
+    )
+    .to_basic_geometries();
+
+    let top_plane_triangle = BoundedPlane::with_material(
+        -Vec3::unit_y(),
+        Vec3::new(WINDOW_WIDTH as f32 * 0.5, 0.0, SCENE_DEPTH as f32 * 0.5),
+        Vec3::unit_z(),
+        WINDOW_WIDTH as f32,
+        SCENE_DEPTH - 1.0,
+        Material::new(ColorType::new(0.75, 0.5, 0.75), 0.0, 0.0),
+    )
+    .to_basic_geometries();
+
+    let left_plane_triangle = BoundedPlane::with_material(
+        Vec3::unit_x(),
+        Vec3::new(0.0, WINDOW_HEIGHT as f32 * 0.5, SCENE_DEPTH as f32 * 0.5),
+        Vec3::unit_z(),
+        WINDOW_HEIGHT as f32,
+        SCENE_DEPTH - 1.0,
+        Material::new(ColorType::new(0.75, 0.75, 0.5), 0.0, 0.0),
+    )
+    .to_basic_geometries();
+
+    let right_plane_triangle = BoundedPlane::with_material(
+        -Vec3::unit_x(),
+        Vec3::new(
+            WINDOW_WIDTH as f32,
+            WINDOW_HEIGHT as f32 * 0.5,
+            SCENE_DEPTH as f32 * 0.5,
+        ),
+        -Vec3::unit_z(),
+        WINDOW_HEIGHT as f32,
+        SCENE_DEPTH - 1.0,
+        Material::new(ColorType::new(0.75, 0.75, 0.5), 0.0, 0.0),
+    )
+    .to_basic_geometries();
+
+    for triangles in [
+        back_plane_triangle,
+        bottom_plane_triangle,
+        top_plane_triangle,
+        left_plane_triangle,
+        right_plane_triangle,
+    ] {
+        for triangle in triangles {
+            scene.add_triangle(triangle);
+        }
     }
 
     scene
@@ -551,7 +645,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         // Create ambient light
         let ambient_light =
-            AmbientLight::<V>::new(ColorType::new(one, one, one), V::Scalar::from_subset(&0.1));
+            AmbientLight::<V>::new(ColorType::new(one, one, one), V::Scalar::from_subset(&0.08));
 
         // Get material color
         let material_color = interaction.material.color.clone();
@@ -628,6 +722,21 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     &((light_color_simd * light_factor) + specular_light),
                     &ColorType::<V::Scalar>::new(zero, zero, zero),
                 );
+        }
+
+        // todo calculate reflections of light sources on reflecting surfaces. E.g. a lamp shines on a mirror shall produce light reflected based on incident angle
+        if cfg!(feature = "light_reflections") {
+            // for object in check_objects.get_all() {
+            //     let is_reflective = object.get_material().is_reflective();
+            //
+            //     if is_reflective.none() {
+            //         continue;
+            //     }
+            //
+            //     for light in lights.clone() {}
+            //
+            //     Raytracer::cast_ray(interaction.point)
+            // }
         }
 
         // Combine ambient and direct lighting

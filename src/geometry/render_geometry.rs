@@ -1,7 +1,7 @@
 use crate::geometry::Ray;
 use crate::geometry::basic::{BasicGeometry, sphere::SphereData, triangle::TriangleData};
 use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
-use crate::raytracing::{Intersectable, SurfaceInteraction};
+use crate::raytracing::{Intersectable, Material, SurfaceInteraction};
 use crate::vector::{
     NormalizableVector, SimdCapableVector, Vector, Vector3DAccessor, VectorAssociations,
 };
@@ -64,6 +64,14 @@ where
     /// Create a new RenderGeometry from a triangle
     pub fn new_triangle(triangle: TriangleData<V>) -> Self {
         RenderGeometry::Triangle(triangle)
+    }
+
+    #[inline]
+    pub fn get_material(&self) -> Material<V::Scalar> {
+        match self {
+            RenderGeometry::Sphere(sphere) => sphere.material,
+            RenderGeometry::Triangle(triangle) => triangle.material,
+        }
     }
 }
 

@@ -1,4 +1,6 @@
 use crate::helpers::{ColorType, Splatable};
+use crate::simd_compat::SimdValueRealSimplified;
+use palette::{Hsv, IntoColor, Srgb};
 use simba::scalar::SubsetOf;
 use simba::simd::SimdValue;
 
@@ -52,4 +54,13 @@ where
     {
         <Self as Splatable<_>>::splat(v)
     }
+}
+
+#[inline(always)]
+pub fn maximize_value<S: SimdValueRealSimplified>(color: ColorType<S>) -> ColorType<S> {
+    let x: Srgb<S> = color.into_encoding();
+    let mut y: Hsv<_, S> = x.into_color();
+    y.value = <S as palette::num::One>::one();
+
+    IntoColor::<Srgb<S>>::into_color(y).into_linear()
 }
