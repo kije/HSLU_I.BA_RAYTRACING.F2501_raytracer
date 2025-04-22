@@ -38,7 +38,13 @@ use std::sync::Arc;
 use std::sync::LazyLock;
 use ultraviolet::{Rotor3, Vec3, Vec3x8, f32x8};
 
+const SCENE_DEPTH: f32 = 1000.0;
 static RENDER_RAY_DIRECTION: Vec3 = Vec3::new(0.0, 0.0, 1.0);
+static RENDER_RAY_FOCUS: Vec3 = Vec3::new(
+    WINDOW_WIDTH as f32 / 2.0,
+    WINDOW_HEIGHT as f32 / 2.0,
+    -2.0 * SCENE_DEPTH,
+);
 
 const RAYTRACE_REFLECTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
     18
@@ -318,9 +324,12 @@ pub struct RaytracerRenderer<C: OutputColorEncoder>(PhantomData<C>);
 
 impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn get_pixel_color(RenderCoordinates { x, y }: RenderCoordinates) -> Option<Pixel> {
+        let coords = Vec3::new(x as f32, y as f32, 0.0);
+        let render_ray_direction = coords - RENDER_RAY_FOCUS;
+
         let (colors, valid) = Self::get_pixel_color_vectorized(
-            Vec3::new(x as f32, y as f32, 0.0),
-            RENDER_RAY_DIRECTION,
+            coords,
+            render_ray_direction,
             &SCENE.scene_objects,
             LIGHTS.iter(),
         )?;
@@ -334,7 +343,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
     fn get_pixel_color_vectorized<'a, V>(
         coords: V,
-        unit_z: V,
+        direction: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
     ) -> Option<(
@@ -350,13 +359,10 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         Standard: Distribution<<V as Vector>::Scalar>,
         [(); <V as Vector>::LANES]:,
     {
-        // Determine if we should use antialiasing
-        let antialiasing = cfg!(feature = "anti_aliasing");
-
-        if antialiasing {
-            Self::antialiased_raytrace(coords, unit_z, check_objects, lights)
+        if cfg!(feature = "anti_aliasing") {
+            Self::antialiased_raytrace(coords, direction, check_objects, lights)
         } else {
-            Self::single_raytrace::<false, false, _>(coords, unit_z, check_objects, lights, None)
+            Self::single_raytrace::<false, false, _>(coords, direction, check_objects, lights, None)
         }
     }
 
@@ -366,7 +372,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     ///
     fn single_raytrace<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
         coords: V,
-        unit_z: V,
+        direction: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
         recursion_depth: Option<usize>,
@@ -390,7 +396,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let zero = V::Scalar::zero();
 
         let (ray, nearest_interaction) =
-            Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(coords, unit_z, check_objects)?;
+            Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(coords, direction, check_objects)?;
 
         let color = Self::calculate_lighting::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
             &nearest_interaction,
@@ -632,7 +638,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     #[inline(always)]
     fn antialiased_raytrace<'a, V>(
         coords: V,
-        unit_z: V,
+        direction: V,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
     ) -> Option<(
@@ -680,7 +686,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let default_mask = bool_false;
         let (initial_color, initial_mask) = Self::single_raytrace::<false, false, _>(
             coords,
-            unit_z,
+            direction,
             check_objects,
             lights.clone(),
             None,
@@ -697,7 +703,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 let random_vec = V::sample_random() * sampling_direction_bias;
                 let (c, m) = Self::single_raytrace::<true, false, _>(
                     coords + (random_vec * sample_radius),
-                    unit_z,
+                    direction,
                     check_objects,
                     lights.clone(),
                     None,
@@ -729,9 +735,10 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
             if likely(len == 8) {
                 let coords = Vec3x8::new(f32x8::from(xs), f32x8::from(ys), f32x8::from(zs));
+                let render_ray_direction = coords - Vec3x8::splat(RENDER_RAY_FOCUS);
                 let Some((colors, valid_mask)) = Self::get_pixel_color_vectorized(
                     coords,
-                    Vec3x8::unit_z(),
+                    render_ray_direction,
                     &SCENE.scene_objects,
                     LIGHTS.iter(),
                 ) else {
