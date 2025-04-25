@@ -5,6 +5,7 @@
 
 pub mod color;
 pub mod extensions;
+pub mod float_ext;
 pub mod geometry;
 pub mod helpers;
 pub mod image_buffer;

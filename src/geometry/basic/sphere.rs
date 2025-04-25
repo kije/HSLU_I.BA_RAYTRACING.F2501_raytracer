@@ -4,6 +4,7 @@ use crate::helpers::{ColorType, Splatable};
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
+use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{NormalizableVector, SimdCapableVector, Vector, VectorAware};
 use crate::vector_traits::{BaseVector, RenderingVector, SimdRenderingVector};
 use num_traits::One;
@@ -16,7 +17,7 @@ use std::ops::Neg;
 
 /// Represents a sphere in 3D space
 #[derive(Debug, Copy, Clone)]
-pub struct SphereData<V: Vector> {
+pub struct SphereData<V: Vector<Scalar: SimdValueRealSimplified>> {
     /// Center of the sphere
     pub center: V,
 
@@ -27,9 +28,9 @@ pub struct SphereData<V: Vector> {
     pub material: Material<V::Scalar>,
 }
 
-impl<V> VectorAware<V> for SphereData<V> where V: Vector {}
+impl<V> VectorAware<V> for SphereData<V> where V: Vector<Scalar: SimdValueRealSimplified> {}
 
-impl<V: BaseVector> SphereData<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> SphereData<V> {
     pub fn new(center: V, radius: V::Scalar, color: ColorType<V::Scalar>) -> Self {
         Self::with_material(center, radius, Material::diffuse(color))
     }

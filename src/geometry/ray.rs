@@ -12,6 +12,7 @@ where
 {
     pub origin: Vector,
     pub direction: Vector, // todo introduce a "Direction" newtype that garatuees already a normalized vector
+    pub refraction_index: Vector::Scalar,
     pub valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
 }
 
@@ -20,18 +21,24 @@ where
     Vector: crate::vector::Vector,
 {
     #[inline]
-    pub fn new(origin: Vector, direction: Vector) -> Self
+    pub fn new(origin: Vector, direction: Vector, refraction_index: Vector::Scalar) -> Self
     where
         Vector: NormalizableVector,
         [(); <Vector as crate::vector::Vector>::LANES]:,
     {
-        Self::new_with_mask(origin, direction, Vector::Scalar::create_mask(true))
+        Self::new_with_mask(
+            origin,
+            direction,
+            refraction_index,
+            Vector::Scalar::create_mask(true),
+        )
     }
 
     #[inline]
     pub fn new_with_mask(
         origin: Vector,
         direction: Vector,
+        refraction_index: Vector::Scalar,
         valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
     ) -> Self
     where
@@ -40,6 +47,7 @@ where
         Self {
             origin,
             direction: direction.normalized(),
+            refraction_index,
             valid_mask,
         }
     }

@@ -1,9 +1,11 @@
+use crate::helpers::Splatable;
 use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
 use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{
-    NormalizableVector, ReflectableVector, SimdCapableVector, Vector, Vector3DAccessor,
-    Vector3DOperations, VectorAssociations, VectorOperations,
+    NormalizableVector, ReflectableVector, RefractableVector, SimdCapableVector, Vector,
+    Vector3DAccessor, Vector3DOperations, VectorAssociations, VectorOperations,
 };
+use simba::simd::SimdValue;
 use std::ops::{Add, Mul, Neg, Sub};
 
 /// A basic vector trait combining common vector operations
@@ -35,6 +37,8 @@ pub trait RenderingVector:
     BaseVector<Scalar: SimdValueRealSimplified>
     + NormalizableVector
     + ReflectableVector
+    + RefractableVector
+    + crate::float_ext::AbsDiffEq<Output = <Self::Scalar as SimdValue>::SimdBool>
     + Vector3DOperations
     + Neg<Output = Self>
     + Vector3DAccessor
@@ -47,6 +51,8 @@ impl<V> RenderingVector for V where
     V: BaseVector<Scalar: SimdValueRealSimplified>
         + NormalizableVector
         + ReflectableVector
+        + RefractableVector
+        + crate::float_ext::AbsDiffEq<Output = <Self::Scalar as SimdValue>::SimdBool>
         + Vector3DOperations
         + Neg<Output = V>
         + Vector3DAccessor
@@ -57,12 +63,12 @@ impl<V> RenderingVector for V where
 /// A trait for SIMD-compatible vectors with enhanced features needed for rendering,
 /// including mask operations that support lazy selection
 pub trait SimdRenderingVector:
-    RenderingVector + SimdCapableVector<SingleValueVector: RenderingVector>
+    RenderingVector + SimdCapableVector<Scalar:  SimdValueRealSimplified<SimdBool: Splatable<<<<Self as SimdCapableVector>::SingleValueVector as Vector>::Scalar as SimdValue>::SimdBool>>, SingleValueVector: RenderingVector>
 {
 }
 
 // Blanket implementation
 impl<V> SimdRenderingVector for V where
-    V: RenderingVector + SimdCapableVector<SingleValueVector: RenderingVector>
+    V: RenderingVector + SimdCapableVector<Scalar:  SimdValueRealSimplified<SimdBool: Splatable<<<<Self as SimdCapableVector>::SingleValueVector as Vector>::Scalar as SimdValue>::SimdBool>>,SingleValueVector: RenderingVector>
 {
 }

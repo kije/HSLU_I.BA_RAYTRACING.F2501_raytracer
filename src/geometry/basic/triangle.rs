@@ -5,17 +5,20 @@ use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
 use crate::raytracing::SurfaceInteraction;
+use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{SimdCapableVector, Vector, Vector3DAccessor, VectorAssociations, VectorAware};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
 use num_traits::One;
 use num_traits::Zero;
 use simba::scalar::SupersetOf;
+use simba::simd::SimdRealField;
 use simba::simd::{SimdBool, SimdPartialOrd};
+use simba::simd::{SimdComplexField, SimdValue};
 use std::ops::Neg;
 
 /// Represents a triangle in 3D space
 #[derive(Debug, Copy, Clone)]
-pub struct TriangleData<V: Vector> {
+pub struct TriangleData<V: Vector<Scalar: SimdValueRealSimplified>> {
     /// The three vertices of the triangle
     ///        v3
     ///         *
@@ -42,7 +45,7 @@ pub struct TriangleData<V: Vector> {
     pub material: Material<V::Scalar>,
 }
 
-impl<V> VectorAware<V> for TriangleData<V> where V: Vector {}
+impl<V> VectorAware<V> for TriangleData<V> where V: Vector<Scalar: SimdValueRealSimplified> {}
 
 impl<V: RenderingVector> TriangleData<V> {
     pub fn new(vertex1: V, vertex2: V, vertex3: V, color: ColorType<V::Scalar>) -> Self {
@@ -122,7 +125,7 @@ impl<
     fn intersect(&self, ray: &Ray<V>) -> Option<SurfaceInteraction<V>> {
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
-        let epsilon = V::Scalar::from_subset(&f32::EPSILON);
+        let epsilon = V::Scalar::simd_default_epsilon();
 
         let edge1 = self.edge1;
         let edge2 = self.edge2;

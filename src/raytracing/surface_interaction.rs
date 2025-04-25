@@ -1,6 +1,7 @@
 use crate::helpers::ColorType;
 use crate::raytracing::material::Material;
 use crate::scene::Lightable;
+use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{SimdCapableVector, Vector};
 use crate::vector_traits::RenderingVector;
 use simba::simd::SimdValue;
@@ -8,7 +9,7 @@ use simba::simd::SimdValue;
 /// Represents all the data needed for shading at an intersection point
 /// This decouples the geometry type from the shading calculations
 #[derive(Clone, Debug)]
-pub struct SurfaceInteraction<V: Vector> {
+pub struct SurfaceInteraction<V: Vector<Scalar: SimdValueRealSimplified>> {
     /// The point of intersection in 3D space
     pub point: V,
 
@@ -57,7 +58,7 @@ impl<V: RenderingVector + SimdCapableVector> SurfaceInteraction<V> {
     }
 }
 
-impl<V: Vector> Lightable<V> for SurfaceInteraction<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> Lightable<V> for SurfaceInteraction<V> {
     #[inline(always)]
     fn get_material_color_at(&self, point: V) -> ColorType<V::Scalar> {
         debug_assert!(point == self.point);

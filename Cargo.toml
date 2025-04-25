@@ -14,15 +14,16 @@ path = "src/main.rs"
 [dependencies]
 minifb = "0.28"
 rayon = "1.10"
-ultraviolet = { version = "0.9", features = ["mint", "int", "f64", "num-traits"] }
+ultraviolet = { version = "0.9", features = ["mint", "int", "f64", "num-traits", "bytemuck"] }
 
-palette = { version = "0.7", git = "https://github.com/kije/palette.git", features = ["wide", "simba"] }
+palette = { version = "0.7", git = "https://github.com/kije/palette.git", features = ["wide", "simba", "rand", "phf", "bytemuck"] }
 
 
 wide = "0.7"
 # simd_aligned = "0.6"
 simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support", "rand"] }
 num-traits = "0.2"
+approx = "0.5.1"
 pastey = "0.1.0"
 itertools = "0.14"
 # by_address = "1.2.1"
@@ -53,8 +54,9 @@ medium_resolution = []
 soft_shadows = []
 reflections = []
 light_reflections = []
-realistic = ["reflections", "light_reflections", "soft_shadows"]
+refractions = []
+realistic = ["reflections", "light_reflections", "soft_shadows", "refractions"]
 high_quality = ["anti_aliasing"]
 
 [patch.crates-io]
-simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support"] }
+simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support", "rand"] }

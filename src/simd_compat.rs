@@ -1,3 +1,4 @@
+use crate::float_ext::AbsDiffEq;
 use crate::helpers::Splatable;
 use crate::scalar::Scalar;
 use num_traits::{Float, FromPrimitive, Num, NumAssignOps, NumOps, One, Zero};
@@ -36,6 +37,7 @@ pub trait SimdValueSimplified:
                       + Default
                       + SimdBool
                       + Send
+                      + From<bool>
                       + Sync
                       + Select<Self>
                       + LazySelect<Self>,
@@ -70,6 +72,7 @@ impl<V> SimdValueSimplified for V where
                           + Default
                           + SimdBool
                           + Send
+                          + From<bool>
                           + Sync
                           + Select<Self>
                           + LazySelect<Self>,
@@ -98,6 +101,7 @@ impl<V> SimdValueSignedSimplified for V where
 pub trait SimdValueRealSimplified:
     SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
     + SimdRealField
+    + AbsDiffEq
     + palette::num::Real
     + palette::num::Sqrt
     + palette::num::Zero
@@ -119,6 +123,7 @@ pub trait SimdValueRealSimplified:
 impl<V> SimdValueRealSimplified for V where
     V: SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
         + SimdRealField
+        + AbsDiffEq
         + palette::num::Real
         + palette::num::Sqrt
         + palette::num::Zero

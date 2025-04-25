@@ -6,7 +6,9 @@ use crate::vector::{SimdCapableVector, Vector, Vector3DAccessor, VectorAssociati
 use crate::vector_traits::SimdRenderingVector;
 
 use crate::helpers::Splatable;
+use crate::simd_compat::SimdValueRealSimplified;
 use enumcapsulate::{Encapsulate, VariantDiscriminant};
+use simba::simd::SimdValue;
 use std::collections::HashMap;
 use std::ops::{Deref, Index, Neg};
 
@@ -15,7 +17,7 @@ use std::ops::{Deref, Index, Neg};
 #[enumcapsulate(discriminant(name = RenderGeometryKind))]
 pub enum RenderGeometry<V>
 where
-    V: Vector,
+    V: Vector<Scalar: SimdValueRealSimplified>,
 {
     Sphere(SphereData<V>),
     Triangle(TriangleData<V>),
@@ -38,7 +40,7 @@ where
 
 impl<V> Splatable<RenderGeometry<<V as SimdCapableVector>::SingleValueVector>> for RenderGeometry<V>
 where
-    V: SimdRenderingVector,
+    V: SimdRenderingVector<Scalar: SimdValueRealSimplified<SimdBool: Splatable<<<<V as SimdCapableVector>::SingleValueVector as Vector>::Scalar as SimdValue>::SimdBool>>>,
 {
     fn splat(v: &RenderGeometry<<V as SimdCapableVector>::SingleValueVector>) -> Self {
         match v {
@@ -52,7 +54,7 @@ where
 
 impl<V> RenderGeometry<V>
 where
-    V: Vector,
+    V: Vector<Scalar: SimdValueRealSimplified>,
 {
     /// Create a new RenderGeometry from a sphere
     pub fn new_sphere(sphere: SphereData<V>) -> Self {
@@ -73,13 +75,13 @@ where
     }
 }
 
-impl<V: Vector> From<SphereData<V>> for RenderGeometry<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> From<SphereData<V>> for RenderGeometry<V> {
     fn from(sphere: SphereData<V>) -> Self {
         RenderGeometry::Sphere(sphere)
     }
 }
 
-impl<V: Vector> From<TriangleData<V>> for RenderGeometry<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> From<TriangleData<V>> for RenderGeometry<V> {
     fn from(triangle: TriangleData<V>) -> Self {
         RenderGeometry::Triangle(triangle)
     }
@@ -95,13 +97,13 @@ impl<V> BasicGeometry<V> for RenderGeometry<V> where
 
 /// A collection of geometries organized by kind for efficient access
 #[derive(Debug, Clone)]
-pub struct GeometryCollection<V: Vector> {
+pub struct GeometryCollection<V: Vector<Scalar: SimdValueRealSimplified>> {
     geometries: HashMap<RenderGeometryKind, Vec<RenderGeometry<V>>>,
 }
 
 impl<V> GeometryCollection<V>
 where
-    V: Vector,
+    V: Vector<Scalar: SimdValueRealSimplified>,
 {
     /// Create a new empty geometry collection
     pub fn new() -> Self {
@@ -146,7 +148,7 @@ where
     }
 }
 
-impl<V: Vector> Deref for GeometryCollection<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> Deref for GeometryCollection<V> {
     type Target = HashMap<RenderGeometryKind, Vec<RenderGeometry<V>>>;
 
     fn deref(&self) -> &Self::Target {
@@ -154,7 +156,9 @@ impl<V: Vector> Deref for GeometryCollection<V> {
     }
 }
 
-impl<V: Vector> Index<RenderGeometryKind> for GeometryCollection<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> Index<RenderGeometryKind>
+    for GeometryCollection<V>
+{
     type Output = [RenderGeometry<V>];
 
     fn index(&self, index: RenderGeometryKind) -> &Self::Output {

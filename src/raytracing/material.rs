@@ -1,11 +1,17 @@
 use crate::color::ColorSimdExt;
 use crate::helpers::{ColorType, Splatable};
-use crate::simd_compat::SimdValueSimplified;
-use simba::simd::SimdValue;
+use crate::simd_compat::SimdValueRealSimplified;
+use simba::simd::{SimdOption, SimdValue};
+
+#[derive(Debug, Copy, Clone, Default)]
+pub struct TransmissionProperties<S: SimdValueRealSimplified> {
+    pub refraction_index: S,
+    pub opacity: SimdOption<S>,
+}
 
 /// Surface material properties
-#[derive(Debug, Copy, Clone)]
-pub struct Material<S: SimdValueSimplified> {
+#[derive(Debug, Copy, Clone, Default)]
+pub struct Material<S: SimdValueRealSimplified> {
     /// Surface color
     pub color: ColorType<S>,
 
@@ -14,6 +20,8 @@ pub struct Material<S: SimdValueSimplified> {
 
     /// Shininess of the surface (affects specular highlight) (0.0 = rough surface,  1.0 = very shiny)
     pub shininess: S,
+
+    pub refraction_index: SimdOption<S>,
     // Additional parameters could be added like:
     // - metalness
     // - transparency
@@ -21,19 +29,39 @@ pub struct Material<S: SimdValueSimplified> {
     // - emission
 }
 
-impl<S: SimdValueSimplified> Material<S> {
+impl<S: SimdValueRealSimplified> Material<S> {
     /// Create a new material with basic properties
-    pub fn new(color: ColorType<S>, reflectivity: S, shininess: S) -> Self {
+    pub fn new(
+        color: ColorType<S>,
+        reflectivity: S,
+        shininess: S,
+        refraction_index: SimdOption<S>,
+    ) -> Self {
         Self {
             color,
             reflectivity,
             shininess,
+            refraction_index,
         }
     }
 
     /// Create a simple diffuse material
     pub fn diffuse(color: ColorType<S>) -> Self {
-        Self::new(color, S::zero(), S::zero())
+        Self::new(
+            color,
+            <S as palette::num::Zero>::zero(),
+            <S as palette::num::Zero>::zero(),
+            SimdOption::none(),
+        )
+    }
+
+    pub fn translucent(color: ColorType<S>, refraction_index: S) -> Self {
+        Self::new(
+            color,
+            <S as palette::num::Zero>::zero(),
+            <S as palette::num::Zero>::zero(),
+            SimdOption::new(refraction_index, true.into()),
+        )
     }
 
     /// Blend two materials based on a mask
@@ -42,12 +70,22 @@ impl<S: SimdValueSimplified> Material<S> {
             color: ColorSimdExt::blend(mask.clone(), &a.color, &b.color),
             reflectivity: a.reflectivity.select(mask.clone(), b.reflectivity),
             shininess: a.shininess.select(mask, b.shininess),
+            refraction_index: SimdOption::new(
+                a.refraction_index
+                    .value()
+                    .select(mask, *b.refraction_index.value()),
+                a.refraction_index
+                    .mask()
+                    .select(mask, b.refraction_index.mask()),
+            ),
         }
     }
 }
 
-impl<SourceScalar: SimdValueSimplified, Scalar: SimdValueSimplified + Splatable<SourceScalar>>
-    Splatable<Material<SourceScalar>> for Material<Scalar>
+impl<
+    SourceScalar: SimdValueRealSimplified,
+    Scalar: SimdValueRealSimplified<SimdBool: Splatable<SourceScalar::SimdBool>> + Splatable<SourceScalar>,
+> Splatable<Material<SourceScalar>> for Material<Scalar>
 {
     #[inline(always)]
     fn splat(
@@ -55,6 +93,7 @@ impl<SourceScalar: SimdValueSimplified, Scalar: SimdValueSimplified + Splatable<
             color,
             reflectivity,
             shininess,
+            refraction_index,
             ..
         }: &Material<SourceScalar>,
     ) -> Self {
@@ -62,6 +101,10 @@ impl<SourceScalar: SimdValueSimplified, Scalar: SimdValueSimplified + Splatable<
             Splatable::splat(color),
             Splatable::splat(reflectivity),
             Splatable::splat(shininess),
+            SimdOption::new(
+                Splatable::splat(refraction_index.value()),
+                Splatable::splat(&refraction_index.mask()),
+            ),
         )
     }
 }

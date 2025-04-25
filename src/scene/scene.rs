@@ -1,12 +1,13 @@
 use crate::geometry::GeometryCollection;
 use crate::geometry::{SphereData, TriangleData};
+use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::Vector;
 
-pub struct Scene<V: Vector> {
+pub struct Scene<V: Vector<Scalar: SimdValueRealSimplified>> {
     pub scene_objects: GeometryCollection<V>,
 }
 
-impl<V: Vector> Scene<V> {
+impl<V: Vector<Scalar: SimdValueRealSimplified>> Scene<V> {
     pub fn new() -> Self {
         Self {
             scene_objects: GeometryCollection::new(),

@@ -91,8 +91,6 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
         [(); W * H]:,
         F: (Fn(RenderCoordinates) -> Option<Pixel>) + Sync,
     {
-        let chunk_size = Self::RENDER_STRIDE;
-
         #[cfg(feature = "render_timing_debug")]
         let render_times = Arc::new(Mutex::new(Vec::with_capacity(
             buffer.len() / (chunk_size - 1),
@@ -101,20 +99,17 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
             #[cfg(feature = "render_timing_debug")]
             let render_times = render_times.clone();
 
-            buffer
-                .par_chunks(chunk_size)
-                .enumerate()
-                .for_each(|(chunk_index, p)| {
+            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE / 3, |chunk| {
+                chunk.process_rows(|y, _, set_pixel_value| {
                     #[cfg(feature = "render_timing_debug")]
                     let start = Instant::now();
-                    let chunk_offset = chunk_index * chunk_size;
-                    for (j, pixel) in p.iter().enumerate() {
-                        let pixel_offset = chunk_offset + j;
-                        let x = pixel_offset % W;
-                        let y = pixel_offset / W;
+
+                    for i in (0..chunk.width()) {
+                        let (x, y) = chunk.global_coordinates(i, y);
 
                         if let Some(pixel_color) = cb(RenderCoordinates { x, y }) {
-                            pixel.store(C::to_output(&pixel_color), Ordering::Relaxed);
+                            set_pixel_value(i, C::to_output(&pixel_color));
+
                             if cfg!(feature = "simulate_slow_render") {
                                 thread::sleep(Duration::from_micros(70));
                             }
@@ -126,6 +121,7 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
                         render_times.push(start.elapsed().as_secs_f64());
                     }
                 });
+            });
         }
 
         #[cfg(feature = "render_timing_debug")]
@@ -150,7 +146,7 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
             #[cfg(feature = "render_timing_debug")]
             let render_times = render_times.clone();
 
-            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE, |chunk| {
+            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE / 3, |chunk| {
                 // Cache-friendly approach: process row by row
                 chunk.process_rows(|y, _, set_pixel_value| {
                     #[cfg(feature = "render_timing_debug")]

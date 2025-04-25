@@ -22,10 +22,12 @@ impl Raytracer {
         let ray = Ray::<V>::new_with_mask(
             from,
             direction,
-            <<V as Vector>::Scalar as SimdValue>::SimdBool::splat(true),
+            V::Scalar::default(),
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(true),
         );
 
-        let mut has_intersection = <<V as Vector>::Scalar as SimdValue>::SimdBool::splat(false);
+        let mut has_intersection =
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(false);
 
         for object in check_objects.get_all() {
             let object = RenderGeometry::<V>::splat(object);
@@ -53,6 +55,7 @@ impl Raytracer {
     pub fn cast_ray<const IS_ANTIALIASING_RAY: bool, V>(
         from: V,
         direction: V,
+        start_refraction_index: V::Scalar,
         check_objects: &GeometryCollection<V::SingleValueVector>,
     ) -> Option<(Ray<V>, SurfaceInteraction<V>)>
     where
@@ -61,7 +64,8 @@ impl Raytracer {
         let ray = Ray::<V>::new_with_mask(
             from,
             direction,
-            <<V as Vector>::Scalar as SimdValue>::SimdBool::splat(false),
+            start_refraction_index,
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(false),
         );
 
         // fixme why?

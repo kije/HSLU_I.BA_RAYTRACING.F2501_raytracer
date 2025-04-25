@@ -6,7 +6,7 @@ use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::{Itertools, izip};
 use rayon::iter::ParallelIterator;
-use simba::simd::SimdComplexField;
+use simba::simd::{SimdComplexField, SimdOption};
 
 // Import the consolidated traits
 use crate::color_traits::LightCompatibleColor;
@@ -47,6 +47,12 @@ const RAYTRACE_REFLECTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
     9
 };
 
+const RAYTRACE_REFRACTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
+    18
+} else {
+    9
+};
+
 const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
     if cfg!(feature = "high_quality") {
         14
@@ -57,7 +63,7 @@ const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
     1
 };
 
-static LIGHTS: LazyLock<[PointLight<Vec3>; POINT_LIGHT_MULTIPLICATOR * 7]> = LazyLock::new(|| {
+static LIGHTS: LazyLock<[PointLight<Vec3>; POINT_LIGHT_MULTIPLICATOR * 8]> = LazyLock::new(|| {
     [
         PointLight::new(
             Vec3::new(
@@ -104,15 +110,15 @@ static LIGHTS: LazyLock<[PointLight<Vec3>; POINT_LIGHT_MULTIPLICATOR * 7]> = Laz
             ColorType::new(0.75, 0.56, 0.65),
             0.45,
         ),
-        // PointLight::new(
-        //     Vec3::new(
-        //         (WINDOW_WIDTH / 2) as f32,
-        //         (WINDOW_HEIGHT / 2) as f32,
-        //         0.7 * SCENE_DEPTH,
-        //     ),
-        //     ColorType::new(1.0, 1.0, 1.0),
-        //     1.0,
-        // ),
+        PointLight::new(
+            Vec3::new(
+                (WINDOW_WIDTH / 2) as f32,
+                (WINDOW_HEIGHT / 2) as f32,
+                0.7 * SCENE_DEPTH,
+            ),
+            ColorType::new(1.0, 1.0, 1.0),
+            1.0,
+        ),
         PointLight::new(
             Vec3::new(
                 (WINDOW_WIDTH / 4) as f32,
@@ -144,7 +150,7 @@ static LIGHTS: LazyLock<[PointLight<Vec3>; POINT_LIGHT_MULTIPLICATOR * 7]> = Laz
     .map(|light| light.to_point_light_cloud::<{ POINT_LIGHT_MULTIPLICATOR }>())
     .into_iter()
     .flatten()
-    .collect_array::<{ POINT_LIGHT_MULTIPLICATOR * 7 }>()
+    .collect_array::<{ POINT_LIGHT_MULTIPLICATOR * 8 }>()
     .unwrap()
 });
 
@@ -170,6 +176,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
             0.8,
             0.0,
+            SimdOption::none(),
         ),
     ));
 
@@ -188,8 +195,9 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         88.0,
         Material::new(
             ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
-            1.0,
+            0.0,
             0.2,
+            SimdOption::new(1.5, true),
         ),
     ));
     //
@@ -232,6 +240,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
             0.5,
             0.05,
+            SimdOption::none(),
         ),
     ));
     //
@@ -256,11 +265,6 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     // ));
 
     // Add triangles
-    let mut plane_up = Vec3::unit_y();
-    let mut plane_normal = -Vec3::unit_z();
-    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.355));
-    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.355));
-
     scene.add_triangle(TriangleData::with_material(
         Vec3::new(
             WINDOW_WIDTH as f32 * 0.05,
@@ -273,7 +277,12 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             WINDOW_HEIGHT as f32 * 0.15,
             150.0,
         ),
-        Material::new(ColorType::new(0.5, 0.7, 0.8), 0.25, 0.5),
+        Material::new(
+            ColorType::new(0.5, 0.7, 0.8),
+            0.0,
+            0.5,
+            SimdOption::new(1.5, true),
+        ),
     ));
 
     scene.add_triangle(TriangleData::with_material(
@@ -292,17 +301,56 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             WINDOW_HEIGHT as f32 * 0.35,
             140.0,
         ),
-        Material::new(ColorType::new(0.7, 0.7, 0.8), 0.1, 0.3),
+        Material::new(ColorType::new(0.7, 0.7, 0.8), 0.1, 0.3, SimdOption::none()),
     ));
+
+    scene.add_triangle(TriangleData::with_material(
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.7,
+            WINDOW_HEIGHT as f32 * 0.90,
+            200.0,
+        ),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.55,
+            WINDOW_HEIGHT as f32 * 0.65,
+            200.0,
+        ),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.65,
+            WINDOW_HEIGHT as f32 * 0.55,
+            140.0,
+        ),
+        Material::new(
+            ColorType::new(0.7, 0.7, 0.8),
+            0.1,
+            0.3,
+            SimdOption::new(1.5, true),
+        ),
+    ));
+
+    let mut plane_up = Vec3::unit_y();
+    let mut plane_normal = -Vec3::unit_z();
+    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.555));
+    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.555));
 
     // Convert BoundedPlane to basic geometries and add them
     let plane_triangles = BoundedPlane::with_material(
         plane_normal,
-        Vec3::new(WINDOW_WIDTH as f32 * 0.5, WINDOW_HEIGHT as f32 * 0.5, 250.0),
+        Vec3::new(
+            WINDOW_WIDTH as f32 * 0.5,
+            WINDOW_HEIGHT as f32 * 0.45,
+            270.0,
+        ),
         plane_up,
         WINDOW_WIDTH as f32 * 0.55,
         WINDOW_HEIGHT as f32 * 0.55,
-        Material::new(ColorType::new(0.6, 0.7, 0.5), 0.24, 0.05),
+        0.01 * SCENE_DEPTH,
+        Material::new(
+            ColorType::new(0.6, 0.7, 0.5),
+            0.075,
+            0.07,
+            SimdOption::new(1.5, true),
+        ),
     )
     .to_basic_geometries();
 
@@ -320,7 +368,13 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         Vec3::unit_y(),
         WINDOW_WIDTH as f32,
         WINDOW_HEIGHT as f32,
-        Material::new(ColorType::new(0.5, 0.75, 0.75), 0.0, 0.0),
+        0.001 * SCENE_DEPTH,
+        Material::new(
+            ColorType::new(0.5, 0.75, 0.75),
+            0.0,
+            0.0,
+            SimdOption::none(),
+        ),
     )
     .to_basic_geometries();
 
@@ -334,7 +388,13 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         Vec3::unit_z(),
         WINDOW_WIDTH as f32,
         SCENE_DEPTH - 1.0,
-        Material::new(ColorType::new(0.75, 0.5, 0.75), 0.0, 0.0),
+        0.001 * SCENE_DEPTH,
+        Material::new(
+            ColorType::new(0.75, 0.5, 0.75),
+            0.0,
+            0.0,
+            SimdOption::none(),
+        ),
     )
     .to_basic_geometries();
 
@@ -344,7 +404,13 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         Vec3::unit_z(),
         WINDOW_WIDTH as f32,
         SCENE_DEPTH - 1.0,
-        Material::new(ColorType::new(0.75, 0.5, 0.75), 0.0, 0.0),
+        0.001 * SCENE_DEPTH,
+        Material::new(
+            ColorType::new(0.75, 0.5, 0.75),
+            0.0,
+            0.0,
+            SimdOption::none(),
+        ),
     )
     .to_basic_geometries();
 
@@ -354,7 +420,13 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         Vec3::unit_z(),
         WINDOW_HEIGHT as f32,
         SCENE_DEPTH - 1.0,
-        Material::new(ColorType::new(0.75, 0.75, 0.5), 0.0, 0.0),
+        0.001 * SCENE_DEPTH,
+        Material::new(
+            ColorType::new(0.75, 0.75, 0.5),
+            0.0,
+            0.0,
+            SimdOption::none(),
+        ),
     )
     .to_basic_geometries();
 
@@ -368,7 +440,13 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
         -Vec3::unit_z(),
         WINDOW_HEIGHT as f32,
         SCENE_DEPTH - 1.0,
-        Material::new(ColorType::new(0.75, 0.75, 0.5), 0.0, 0.0),
+        0.001 * SCENE_DEPTH,
+        Material::new(
+            ColorType::new(0.75, 0.75, 0.5),
+            0.0,
+            0.0,
+            SimdOption::none(),
+        ),
     )
     .to_basic_geometries();
 
@@ -437,10 +515,24 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         Standard: Distribution<<V as Vector>::Scalar>,
         [(); <V as Vector>::LANES]:,
     {
+        let start_refraction_index = V::Scalar::from_subset(&1.000293); // air
         if cfg!(feature = "anti_aliasing") {
-            Self::antialiased_raytrace(coords, direction, check_objects, lights)
+            Self::antialiased_raytrace(
+                coords,
+                direction,
+                start_refraction_index,
+                check_objects,
+                lights,
+            )
         } else {
-            Self::single_raytrace::<false, false, _>(coords, direction, check_objects, lights, None)
+            Self::single_raytrace::<false, false, false, _>(
+                coords,
+                direction,
+                start_refraction_index,
+                check_objects,
+                lights,
+                None,
+            )
         }
     }
 
@@ -448,9 +540,16 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     ///
     /// `IS_ANTIALIASING_RAY` param may be set to true if the ray is used for antialiasing and might be used to skip complex calculations that are not relevant for antialiasing
     ///
-    fn single_raytrace<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
+    fn single_raytrace<
+        'a,
+        const IS_ANTIALIASING_RAY: bool,
+        const IS_REFLECTION_RAY: bool,
+        const IS_REFRACTION_RAY: bool,
+        V,
+    >(
         coords: V,
         direction: V,
+        start_refraction_index: V::Scalar,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
         recursion_depth: Option<usize>,
@@ -473,8 +572,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         }
         let zero = V::Scalar::zero();
 
-        let (ray, nearest_interaction) =
-            Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(coords, direction, check_objects)?;
+        let (ray, nearest_interaction) = Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(
+            coords,
+            direction,
+            start_refraction_index,
+            check_objects,
+        )?;
 
         let color = Self::calculate_lighting::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
             &nearest_interaction,
@@ -483,10 +586,30 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             lights.clone(),
         );
 
+        // fixme reflection and refractions can be calculated in parallel
         let reflection_color = if cfg!(feature = "reflections") {
-            Self::calculate_reflection::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
+            Self::calculate_reflection::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, IS_REFRACTION_RAY, _>(
                 &nearest_interaction,
                 ray.direction,
+                start_refraction_index,
+                check_objects,
+                lights.clone(),
+                recursion_depth,
+            )
+        } else {
+            ColorType::new(zero, zero, zero)
+        };
+
+        let refraction_color = if cfg!(feature = "refractions") {
+            Self::calculate_refractions::<
+                IS_ANTIALIASING_RAY,
+                IS_REFLECTION_RAY,
+                IS_REFRACTION_RAY,
+                _,
+            >(
+                &nearest_interaction,
+                ray.direction,
+                start_refraction_index,
                 check_objects,
                 lights,
                 recursion_depth,
@@ -495,12 +618,159 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             ColorType::new(zero, zero, zero)
         };
 
-        Some((color + reflection_color, nearest_interaction.valid_mask))
+        let color = ColorSimdExt::blend(
+            nearest_interaction.material.refraction_index.mask(),
+            &refraction_color,
+            &color,
+        );
+
+        Some((
+            color + reflection_color + refraction_color,
+            nearest_interaction.valid_mask,
+        ))
     }
 
-    fn calculate_reflection<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
+    fn calculate_refractions<
+        'a,
+        const IS_ANTIALIASING_RAY: bool,
+        const IS_REFLECTION_RAY: bool,
+        const IS_REFRACTION_RAY: bool,
+        V,
+    >(
         interaction: &SurfaceInteraction<V>,
         view_dir: V,
+        start_refraction_index: V::Scalar,
+        check_objects: &GeometryCollection<V::SingleValueVector>,
+        lights: impl SceneLightIterator<'a, V> + Send + 'static,
+        recursion_depth: Option<usize>,
+    ) -> ColorType<V::Scalar>
+    where
+        V: 'a
+            + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
+            + Send
+            + 'static,
+        ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+        Standard: Distribution<<V as Vector>::Scalar>,
+    {
+        let zero = V::Scalar::zero();
+        let bool_false =
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false);
+
+        let material_is_refractive = interaction.material.refraction_index.mask();
+
+        if interaction.valid_mask.none() || material_is_refractive.none() {
+            return ColorType::new(zero, zero, zero);
+        }
+
+        macro_rules! impl_refraction_raytrace {
+            (
+                let $refraction_contribution:ident = $single_raytrace:ident(
+                    $interaction_point:expr,
+                    $light_dir:expr,
+                    $start_refraction_index:expr,
+                    $check_objects:expr,
+                    $lights:expr,
+                    $recursion_depth:expr,
+                ) $(if $condition:expr)?
+            ) => {
+                let $refraction_contribution = if cfg!(feature = "refractions") $( && $condition)?  {
+                    if IS_REFRACTION_RAY {
+                        impl_refraction_raytrace!(
+                            $single_raytrace,
+                            $interaction_point,
+                            $light_dir,
+                            $start_refraction_index,
+                            $check_objects,
+                            $lights,
+                            $recursion_depth
+                        )
+                    } else {
+                        let lights = ($lights).clone();
+                        let interaction_point = ($interaction_point).clone();
+                        let check_objects = ($check_objects).clone();
+                        let light_dir = ($light_dir).clone();
+                        let start_refraction_index = ($start_refraction_index).clone();
+                        std::thread::spawn(move || {
+                            impl_refraction_raytrace!(
+                                $single_raytrace,
+                                interaction_point,
+                                light_dir,
+                                start_refraction_index,
+                                &check_objects,
+                                lights,
+                                $recursion_depth
+                            )
+                        })
+                        .join()
+                        .unwrap()
+                    }
+                } else {
+                    None
+                };
+            };
+            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $start_refraction_index:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr) => {
+                Self::$single_raytrace::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, true, _>(
+                    $interaction_point,
+                    $light_dir,
+                    $start_refraction_index,
+                    $check_objects,
+                    $lights,
+                    $recursion_depth
+                        .map(|d| d - 1)
+                        .or(Some(RAYTRACE_REFRACTION_MAX_DEPTH)),
+                )
+            };
+        }
+
+        let cos_theta = view_dir.dot(interaction.normal);
+        let is_inside_object = cos_theta.simd_le(zero);
+
+        let inormal = V::blend(is_inside_object, interaction.normal, -interaction.normal);
+
+        let interaction_refraction_index = *interaction.material.refraction_index.value();
+        let new_medium_refraction_index = interaction_refraction_index
+            .select(is_inside_object, V::Scalar::from_subset(&1.000293));
+
+        let eta = (start_refraction_index / new_medium_refraction_index).select(
+            is_inside_object,
+            new_medium_refraction_index / start_refraction_index,
+        );
+
+        let refraction_direction = view_dir.refracted(inormal, eta).normalized();
+
+        impl_refraction_raytrace! {
+            let refraction_color = single_raytrace(
+                (interaction.point + (refraction_direction * V::broadcast(<V as Vector>::Scalar::from_subset(&(1.5e-03_f32))))),
+                refraction_direction,
+                new_medium_refraction_index,
+                check_objects,
+                lights.clone(),
+                recursion_depth,
+            )
+        }
+
+        let (refraction, refraction_valid) =
+            refraction_color.unwrap_or((ColorType::<V::Scalar>::new(zero, zero, zero), bool_false));
+
+        let reflection_valid = refraction_valid & interaction.valid_mask & material_is_refractive;
+
+        ColorType::<V::Scalar>::blend(
+            reflection_valid,
+            &refraction, // fixme support opacity factor
+            &ColorType::<V::Scalar>::new(zero, zero, zero),
+        )
+    }
+
+    fn calculate_reflection<
+        'a,
+        const IS_ANTIALIASING_RAY: bool,
+        const IS_REFLECTION_RAY: bool,
+        const IS_REFRACTION_RAY: bool,
+        V,
+    >(
+        interaction: &SurfaceInteraction<V>,
+        view_dir: V,
+        start_refraction_index: V::Scalar,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
         recursion_depth: Option<usize>,
@@ -532,6 +802,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 let $reflection_contribution:ident = $single_raytrace:ident(
                     $interaction_point:expr,
                     $light_dir:expr,
+                    $start_refraction_index:expr,
                     $check_objects:expr,
                     $lights:expr,
                     $recursion_depth:expr,
@@ -543,20 +814,23 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                             $single_raytrace,
                             $interaction_point,
                             $light_dir,
+                            $start_refraction_index,
                             $check_objects,
                             $lights,
                             $recursion_depth
                         )
                     } else {
-                        let lights = $lights.clone();
-                        let interaction_point = $interaction_point.clone();
-                        let check_objects = $check_objects.clone();
-                        let light_dir = $light_dir.clone();
+                        let lights = ($lights).clone();
+                        let interaction_point = ($interaction_point).clone();
+                        let check_objects = ($check_objects).clone();
+                        let light_dir = ($light_dir).clone();
+                        let start_refraction_index = ($start_refraction_index).clone();
                         std::thread::spawn(move || {
                             impl_reflection_raytrace!(
                                 $single_raytrace,
                                 interaction_point,
                                 light_dir,
+                                start_refraction_index,
                                 &check_objects,
                                 lights,
                                 $recursion_depth
@@ -569,10 +843,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     None
                 };
             };
-            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr) => {
-                Self::$single_raytrace::<IS_ANTIALIASING_RAY, true, _>(
+            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $start_refraction_index:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr) => {
+                Self::$single_raytrace::<IS_ANTIALIASING_RAY, true, IS_REFRACTION_RAY, _>(
                     $interaction_point,
                     $light_dir,
+                    $start_refraction_index,
                     $check_objects,
                     $lights,
                     $recursion_depth
@@ -584,20 +859,26 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let reflection_direction = view_dir.reflected(interaction.normal).normalized();
 
+        let reflection_is_none = reflection_direction.abs_diff_eq_default(&V::broadcast(zero));
+
         impl_reflection_raytrace! {
             let reflection_color = single_raytrace(
-                (interaction.point + (reflection_direction * V::broadcast(<V as Vector>::Scalar::from_subset(&(1.5e-02_f32))))),
+                (interaction.point + (reflection_direction * V::broadcast(<V as Vector>::Scalar::from_subset(&(1.5e-03_f32))))),
                 reflection_direction,
+                start_refraction_index,
                 check_objects,
                 lights.clone(),
                 recursion_depth,
-            )
+            ) if (reflection_is_none.none())
         }
 
         let (reflection, reflection_valid) =
             reflection_color.unwrap_or((ColorType::<V::Scalar>::new(zero, zero, zero), bool_false));
 
-        let reflection_valid = reflection_valid & interaction.valid_mask & material_is_reflective;
+        let reflection_valid = reflection_valid
+            & interaction.valid_mask
+            & material_is_reflective
+            & !reflection_is_none;
 
         ColorType::<V::Scalar>::blend(
             reflection_valid,
@@ -731,6 +1012,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     fn antialiased_raytrace<'a, V>(
         coords: V,
         direction: V,
+        start_refraction_index: V::Scalar,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
     ) -> Option<(
@@ -776,9 +1058,10 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let default_color = ColorType::new(zero, zero, zero);
         let default_mask = bool_false;
-        let (initial_color, initial_mask) = Self::single_raytrace::<false, false, _>(
+        let (initial_color, initial_mask) = Self::single_raytrace::<false, false, false, _>(
             coords,
             direction,
+            start_refraction_index,
             check_objects,
             lights.clone(),
             None,
@@ -793,9 +1076,10 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             .filter_map(|i| {
                 let sampling_direction_bias = directions[i % directions.len()];
                 let random_vec = V::sample_random() * sampling_direction_bias;
-                let (c, m) = Self::single_raytrace::<true, false, _>(
+                let (c, m) = Self::single_raytrace::<true, false, false, _>(
                     coords + (random_vec * sample_radius),
                     direction,
+                    start_refraction_index,
                     check_objects,
                     lights.clone(),
                     None,

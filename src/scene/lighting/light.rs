@@ -10,6 +10,8 @@ use num_traits::{One, Zero};
 use palette::bool_mask::BoolMask;
 use rand::distributions::{Distribution, Standard};
 use simba::scalar::SupersetOf;
+use simba::simd::SimdComplexField;
+use simba::simd::SimdRealField;
 use simba::simd::{SimdPartialOrd, SimdValue};
 
 #[derive(Debug, Copy, Clone)]
@@ -238,9 +240,8 @@ where
     ) -> LightContribution<V::Scalar> {
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
-        let epsilon = V::Scalar::from_subset(&f32::EPSILON);
-        let half = V::Scalar::from_subset(&0.15);
-        let thousand = V::Scalar::from_subset(&35000.0); // Fixme strange hardcoded constant
+        let epsilon = V::Scalar::simd_default_epsilon();
+        let thousand = V::Scalar::from_subset(&50000.0); // Fixme strange hardcoded constant
 
         let normal = lightable.get_surface_normal_at(point_position);
         let material = lightable.get_material_color_at(point_position);
@@ -253,12 +254,12 @@ where
         // Check if light is on the right side of the surface
         let incident_angle_pos = incident_light_angle_cos.simd_gt(zero);
 
-        let attenuation =
-            thousand / (epsilon + one * light_distance + one * light_distance * light_distance);
+        let attenuation = thousand / (epsilon + light_distance + light_distance * light_distance);
 
+        let att_sigmoid = attenuation.simd_tanh();
         // Calculate light intensity based on angle and distance
         let light_factor =
-            incident_light_angle_cos * self.intensity * attenuation.simd_clamp(epsilon, one + half);
+            incident_light_angle_cos * self.intensity * att_sigmoid.simd_clamp(epsilon, one);
 
         LightContribution::new(
             ColorType::blend(
