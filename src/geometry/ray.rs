@@ -1,4 +1,5 @@
-use crate::simd_compat::SimdValueBoolExt;
+use crate::raytracing::TransmissionProperties;
+use crate::simd_compat::{SimdValueBoolExt, SimdValueRealSimplified};
 use crate::vector::{NormalizableVector, VectorAware, VectorOperations};
 use num_traits::Float;
 use simba::simd::SimdValue;
@@ -8,20 +9,24 @@ use std::fmt::Debug;
 #[derive(Clone, Debug, Copy)]
 pub struct Ray<Vector>
 where
-    Vector: crate::vector::Vector,
+    Vector: crate::vector::Vector<Scalar: SimdValueRealSimplified>,
 {
     pub origin: Vector,
     pub direction: Vector, // todo introduce a "Direction" newtype that garatuees already a normalized vector
-    pub refraction_index: Vector::Scalar,
+    pub transmission: TransmissionProperties<Vector::Scalar>,
     pub valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
 }
 
 impl<Vector> Ray<Vector>
 where
-    Vector: crate::vector::Vector,
+    Vector: crate::vector::Vector<Scalar: SimdValueRealSimplified>,
 {
     #[inline]
-    pub fn new(origin: Vector, direction: Vector, refraction_index: Vector::Scalar) -> Self
+    pub fn new(
+        origin: Vector,
+        direction: Vector,
+        transmission: TransmissionProperties<Vector::Scalar>,
+    ) -> Self
     where
         Vector: NormalizableVector,
         [(); <Vector as crate::vector::Vector>::LANES]:,
@@ -29,7 +34,7 @@ where
         Self::new_with_mask(
             origin,
             direction,
-            refraction_index,
+            transmission,
             Vector::Scalar::create_mask(true),
         )
     }
@@ -38,7 +43,7 @@ where
     pub fn new_with_mask(
         origin: Vector,
         direction: Vector,
-        refraction_index: Vector::Scalar,
+        transmission: TransmissionProperties<Vector::Scalar>,
         valid_mask: <<Vector as crate::vector::Vector>::Scalar as SimdValue>::SimdBool,
     ) -> Self
     where
@@ -47,7 +52,7 @@ where
         Self {
             origin,
             direction: direction.normalized(),
-            refraction_index,
+            transmission,
             valid_mask,
         }
     }
@@ -66,7 +71,7 @@ where
 // fixme: shouldn't that (invalid values) be a property of a Vector?
 impl<Vector> Ray<Vector>
 where
-    Vector: crate::vector::Vector,
+    Vector: crate::vector::Vector<Scalar: SimdValueRealSimplified>,
     <Vector::Scalar as SimdValue>::Element: Float,
 {
     #[inline(always)]
@@ -88,7 +93,10 @@ where
     }
 }
 
-impl<Vector> VectorAware<Vector> for Ray<Vector> where Vector: crate::vector::Vector {}
+impl<Vector> VectorAware<Vector> for Ray<Vector> where
+    Vector: crate::vector::Vector<Scalar: SimdValueRealSimplified>
+{
+}
 
 #[cfg(test)]
 mod test_ray {

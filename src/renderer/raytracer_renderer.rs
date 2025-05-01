@@ -18,11 +18,13 @@ use crate::color::ColorSimdExt;
 use crate::geometry::{
     BoundedPlane, CompositeGeometry, GeometryCollection, SphereData, TriangleData,
 };
-use crate::raytracing::Material;
 use crate::raytracing::Raytracer;
 use crate::raytracing::SurfaceInteraction;
+use crate::raytracing::{Material, TransmissionProperties};
 use crate::scene::{AmbientLight, Light, PointLight, Scene};
 use num_traits::{One, Zero};
+use palette::Mix;
+use palette::blend::{Blend, Premultiply};
 use palette::bool_mask::BoolMask;
 use rand::distributions::{Distribution, Standard};
 use rayon::iter::IntoParallelIterator;
@@ -176,7 +178,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
             0.8,
             0.0,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     ));
 
@@ -197,7 +199,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
             0.0,
             0.2,
-            SimdOption::new(1.5, true),
+            TransmissionProperties::new(1.0, 1.5),
         ),
     ));
     //
@@ -240,7 +242,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
             0.5,
             0.05,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     ));
     //
@@ -281,7 +283,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.5, 0.7, 0.8),
             0.0,
             0.5,
-            SimdOption::new(1.5, true),
+            TransmissionProperties::new(1.0, 1.5),
         ),
     ));
 
@@ -301,7 +303,12 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             WINDOW_HEIGHT as f32 * 0.35,
             140.0,
         ),
-        Material::new(ColorType::new(0.7, 0.7, 0.8), 0.1, 0.3, SimdOption::none()),
+        Material::new(
+            ColorType::new(0.7, 0.7, 0.8),
+            0.1,
+            0.3,
+            TransmissionProperties::none(),
+        ),
     ));
 
     scene.add_triangle(TriangleData::with_material(
@@ -324,7 +331,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.7, 0.7, 0.8),
             0.1,
             0.3,
-            SimdOption::new(1.5, true),
+            TransmissionProperties::new(1.0, 1.5),
         ),
     ));
 
@@ -349,7 +356,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.6, 0.7, 0.5),
             0.075,
             0.07,
-            SimdOption::new(1.5, true),
+            TransmissionProperties::new(1.0, 1.5),
         ),
     )
     .to_basic_geometries();
@@ -373,7 +380,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.5, 0.75, 0.75),
             0.0,
             0.0,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     )
     .to_basic_geometries();
@@ -393,7 +400,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.75, 0.5, 0.75),
             0.0,
             0.0,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     )
     .to_basic_geometries();
@@ -409,7 +416,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.75, 0.5, 0.75),
             0.0,
             0.0,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     )
     .to_basic_geometries();
@@ -425,7 +432,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.75, 0.75, 0.5),
             0.0,
             0.0,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     )
     .to_basic_geometries();
@@ -445,7 +452,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
             ColorType::new(0.75, 0.75, 0.5),
             0.0,
             0.0,
-            SimdOption::none(),
+            TransmissionProperties::none(),
         ),
     )
     .to_basic_geometries();
@@ -619,7 +626,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         };
 
         let color = ColorSimdExt::blend(
-            nearest_interaction.material.refraction_index.mask(),
+            nearest_interaction.material.transmission.mask(),
             &refraction_color,
             &color,
         );
@@ -653,10 +660,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         Standard: Distribution<<V as Vector>::Scalar>,
     {
         let zero = V::Scalar::zero();
+        let one = V::Scalar::one();
         let bool_false =
             <<<V as Vector>::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false);
 
-        let material_is_refractive = interaction.material.refraction_index.mask();
+        let material_is_refractive = interaction.material.transmission.mask();
 
         if interaction.valid_mask.none() || material_is_refractive.none() {
             return ColorType::new(zero, zero, zero);
@@ -727,7 +735,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let inormal = V::blend(is_inside_object, interaction.normal, -interaction.normal);
 
-        let interaction_refraction_index = *interaction.material.refraction_index.value();
+        let interaction_refraction_index =
+            *interaction.material.transmission.refraction_index().value();
         let new_medium_refraction_index = interaction_refraction_index
             .select(is_inside_object, V::Scalar::from_subset(&1.000293));
 
@@ -740,7 +749,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         impl_refraction_raytrace! {
             let refraction_color = single_raytrace(
-                (interaction.point + (refraction_direction * V::broadcast(<V as Vector>::Scalar::from_subset(&(1.5e-03_f32))))),
+                (interaction.point + (refraction_direction * V::broadcast(<V as Vector>::Scalar::from_subset(&(1.5e-04_f32))))),
                 refraction_direction,
                 new_medium_refraction_index,
                 check_objects,
@@ -754,9 +763,34 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let reflection_valid = refraction_valid & interaction.valid_mask & material_is_refractive;
 
+        let refraction_opacity = interaction
+            .material
+            .transmission
+            .opacity()
+            .simd_unwrap_or(|| one)
+            .simd_clamp(
+                zero,
+                one - <V as Vector>::Scalar::from_subset(&(0.5e-05_f32)),
+            );
+
+        let premultiplied_color = interaction
+            .material
+            .color
+            .premultiply(refraction_opacity)
+            .into_linear()
+            .multiply(refraction);
+        // FIXME variable names
+        let aaa = interaction
+            .material
+            .color
+            .premultiply(one - refraction_opacity)
+            .into_linear();
+
+        let kkkk = aaa.mix(premultiplied_color, refraction_opacity);
+
         ColorType::<V::Scalar>::blend(
             reflection_valid,
-            &refraction, // fixme support opacity factor
+            &kkkk,
             &ColorType::<V::Scalar>::new(zero, zero, zero),
         )
     }

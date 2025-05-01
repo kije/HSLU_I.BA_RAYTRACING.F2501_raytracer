@@ -1,8 +1,9 @@
 use crate::geometry::{GeometryCollection, Ray, RenderGeometry};
 use crate::helpers::Splatable;
-use crate::raytracing::{Intersectable, SurfaceInteraction};
+use crate::raytracing::{Intersectable, SurfaceInteraction, TransmissionProperties};
 use crate::vector::{NormalizableVector, Vector};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
+use num_traits::One;
 use num_traits::Zero;
 use simba::simd::SimdPartialOrd;
 use simba::simd::{SimdBool, SimdValue};
@@ -22,7 +23,7 @@ impl Raytracer {
         let ray = Ray::<V>::new_with_mask(
             from,
             direction,
-            V::Scalar::default(),
+            TransmissionProperties::default(),
             <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(true),
         );
 
@@ -64,7 +65,7 @@ impl Raytracer {
         let ray = Ray::<V>::new_with_mask(
             from,
             direction,
-            start_refraction_index,
+            TransmissionProperties::new(<V as Vector>::Scalar::one(), start_refraction_index),
             <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(false),
         );
 

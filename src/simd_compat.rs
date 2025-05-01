@@ -1,3 +1,4 @@
+use crate::float_ext;
 use crate::float_ext::AbsDiffEq;
 use crate::helpers::Splatable;
 use crate::scalar::Scalar;
@@ -101,7 +102,7 @@ impl<V> SimdValueSignedSimplified for V where
 pub trait SimdValueRealSimplified:
     SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
     + SimdRealField
-    + AbsDiffEq
+    + AbsDiffEq<Output = Self::SimdBool>
     + palette::num::Real
     + palette::num::Sqrt
     + palette::num::Zero
@@ -123,7 +124,7 @@ pub trait SimdValueRealSimplified:
 impl<V> SimdValueRealSimplified for V where
     V: SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
         + SimdRealField
-        + AbsDiffEq
+        + AbsDiffEq<Output = Self::SimdBool>
         + palette::num::Real
         + palette::num::Sqrt
         + palette::num::Zero
