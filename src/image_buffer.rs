@@ -63,8 +63,14 @@ where
 
         // Process all chunks in parallel
         // Use chunks_y as the outer loop to maximize row-wise locality
-        (0..chunks_y).into_par_iter().for_each(|chunk_y| {
-            (0..chunks_x).into_par_iter().for_each(|chunk_x| {
+        // FIXME: only one parallel iterator 0..(chunks_y * chunks_x) and then calculate chunk_y & chunk_x index via division and modulo
+        (0..(chunks_y * chunks_x))
+            .into_par_iter()
+            .for_each(|chunk_index| {
+                let chunk_x = chunk_index % chunks_x;
+                let chunk_y = chunk_index / chunks_x;
+                //(0..chunks_y).into_par_iter().for_each(|chunk_y| {
+                // (0..chunks_x).into_par_iter().for_each(|chunk_x| {
                 // Calculate actual chunk dimensions (may be smaller at edges)
                 let start_x = chunk_x * aligned_chunk_w;
                 let start_y = chunk_y * chunk_h;
@@ -84,7 +90,7 @@ where
                 // Process the chunk
                 f(chunk_view);
             });
-        });
+        //});
     }
 
     // Alternative API: process the image with a specific chunk size and return results
