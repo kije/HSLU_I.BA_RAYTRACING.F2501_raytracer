@@ -183,7 +183,7 @@ where
         }
 
         let scale = V::Scalar::from_subset(&(1.0 / N as f32));
-        let cloud_radius = V::broadcast(V::Scalar::from_subset(&(1.35 + (N as f32 / 80.0))));
+        let cloud_radius = V::broadcast(V::Scalar::from_subset(&(1.35 + (N as f32 / 72.0))));
 
         (0..N)
             .map(|_| {

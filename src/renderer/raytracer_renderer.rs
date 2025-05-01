@@ -44,20 +44,32 @@ static RENDER_RAY_FOCUS: Vec3 = Vec3::new(
 );
 
 const RAYTRACE_REFLECTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
-    18
+    if cfg!(feature = "extreme_quality") {
+        28
+    } else {
+        18
+    }
 } else {
     9
 };
 
 const RAYTRACE_REFRACTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
-    18
+    if cfg!(feature = "extreme_quality") {
+        25
+    } else {
+        17
+    }
 } else {
-    9
+    8
 };
 
 const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
     if cfg!(feature = "high_quality") {
-        14
+        if cfg!(feature = "extreme_quality") {
+            23
+        } else {
+            14
+        }
     } else {
         6
     }
@@ -191,13 +203,13 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     scene.add_sphere(SphereData::with_material(
         Vec3::new(
             1.9 * (WINDOW_WIDTH as f32 / 2.5),
-            WINDOW_HEIGHT as f32 / 2.5,
+            WINDOW_HEIGHT as f32 / 2.8,
             160.0,
         ),
         88.0,
         Material::new(
             ColorType::new(111.0 / 255.0, 255.0 / 255.0, 222.0 / 255.0),
-            0.0,
+            0.01,
             0.2,
             TransmissionProperties::new(1.0, 1.5),
         ),
@@ -234,7 +246,7 @@ static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
     scene.add_sphere(SphereData::with_material(
         Vec3::new(
             WINDOW_WIDTH as f32 / 2.5,
-            2.25 * (WINDOW_HEIGHT as f32 / 2.5),
+            2.1 * (WINDOW_HEIGHT as f32 / 2.5),
             500.0,
         ),
         250.0,
@@ -1077,7 +1089,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         ];
 
         let samples_per_pixel = if cfg!(feature = "high_quality") {
-            36usize
+            if cfg!(feature = "extreme_quality") {
+                40usize
+            } else {
+                36usize
+            }
         } else {
             9usize
         };
