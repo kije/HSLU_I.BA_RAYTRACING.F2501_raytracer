@@ -136,6 +136,8 @@ impl<
         // happy path - just assume our matrix is invertible without checking it's determinant
         let mat_inverse = mat.inversed();
 
+        let mat_det = mat.determinant();
+
         // [t, u, v]^T
         let tuv = mat_inverse * b;
 
@@ -148,7 +150,7 @@ impl<
 
         // Check if u, v are in valid range for barycentric coordinates
         let uv_invalid = u.simd_lt(zero) | v.simd_lt(zero) | (u + v).simd_ge(one);
-        let valid_mask = !t_invalid & !uv_invalid;
+        let valid_mask = !(t_invalid | uv_invalid) & !mat_det.abs_diff_eq_default(&zero);
 
         if valid_mask.none() {
             return None;
