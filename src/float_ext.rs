@@ -18,7 +18,7 @@ where
     /// equality of two numbers.
     fn abs_diff_eq(&self, other: &Rhs, epsilon: Self::Epsilon) -> Self::Output;
 
-    /// The inverse of [`AbsDiffEq::abs_diff_eq`].
+    #[inline(always)]
     fn abs_diff_ne(&self, other: &Rhs, epsilon: Self::Epsilon) -> Self::Output {
         !Self::abs_diff_eq(self, other, epsilon)
     }
@@ -61,10 +61,12 @@ macro_rules! impl_abs_diff_eq_approx_forward {
                 type Epsilon = <$t as approx::AbsDiffEq>::Epsilon;
                 type Output = bool;
 
+                #[inline(always)]
                 fn default_epsilon() -> Self::Epsilon {
                     <$t as approx::AbsDiffEq>::default_epsilon()
                 }
 
+                #[inline(always)]
                 fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> Self::Output {
                     <$t as approx::AbsDiffEq>::abs_diff_eq(self, other, epsilon)
                 }

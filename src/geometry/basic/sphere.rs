@@ -1,5 +1,5 @@
-use crate::geometry::Ray;
 use crate::geometry::basic::BasicGeometry;
+use crate::geometry::{HasRenderObjectId, Ray, RenderObjectId};
 use crate::helpers::{ColorType, Splatable};
 use crate::raytracing::Intersectable;
 use crate::raytracing::Material;
@@ -26,6 +26,7 @@ pub struct SphereData<V: Vector<Scalar: SimdValueRealSimplified>> {
 
     /// Material for the sphere's surface
     pub material: Material<V::Scalar>,
+    object_id: RenderObjectId<V::Scalar>,
 }
 
 impl<V> VectorAware<V> for SphereData<V> where V: Vector<Scalar: SimdValueRealSimplified> {}
@@ -42,7 +43,17 @@ impl<V: Vector<Scalar: SimdValueRealSimplified>> SphereData<V> {
             r_sq: radius * radius,
             r_inv: V::Scalar::one() / radius,
             material,
+            object_id: RenderObjectId::new(),
         }
+    }
+}
+
+impl<V> HasRenderObjectId<V::Scalar> for SphereData<V>
+where
+    V: Vector<Scalar: SimdValueRealSimplified>,
+{
+    fn get_render_object_id(&self) -> RenderObjectId<V::Scalar> {
+        self.object_id
     }
 }
 
@@ -56,6 +67,7 @@ where
             r_inv: V::Scalar::from_subset(&v.r_inv),
             r_sq: V::Scalar::from_subset(&v.r_sq),
             material: Splatable::splat(&v.material),
+            object_id: RenderObjectId::from(V::Scalar::from_subset(&v.object_id.id())),
         }
     }
 }
@@ -129,6 +141,7 @@ impl<V: RenderingVector + NormalizableVector + SimdCapableVector> Intersectable<
             final_t,
             self.material.clone(),
             final_t_valid,
+            self.object_id,
         ))
     }
 }

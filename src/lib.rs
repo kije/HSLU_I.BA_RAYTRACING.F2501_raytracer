@@ -2,6 +2,9 @@
 #![feature(concat_idents)]
 #![feature(likely_unlikely)]
 #![allow(incomplete_features)]
+extern crate core;
+
+use ultraviolet::Vec3;
 
 pub mod color;
 pub mod extensions;
@@ -66,3 +69,23 @@ pub const WINDOW_HEIGHT: usize = match option_env!("WINDOW_HEIGHT") {
     }
     None => CONFIGURED_WINDOW_HEIGHT,
 };
+
+pub const WINDOW_ASPECT_RATIO: f32 = (WINDOW_HEIGHT as f32) / WINDOW_WIDTH as f32;
+pub const WINDOW_SCENE_DEPTH: usize = (WINDOW_WIDTH + WINDOW_HEIGHT) / 2;
+
+pub const SCENE_WIDTH: f32 = 1.0;
+pub const SCENE_HEIGHT: f32 = 1.0 * WINDOW_ASPECT_RATIO; // Fixme somehow this should also be 1.0 -> e.g. coordinates should be between 0 and 1. Idea: have a pixel size ratio. Coordinates in the scene are 0..1, but then are scaled to pixel-size, where the "pixel" can rectangular instead of quadratic
+pub const SCENE_DEPTH: f32 = 1.0;
+
+pub const WINDOW_TO_SCENE_WIDTH_FACTOR: f32 = SCENE_WIDTH / WINDOW_WIDTH as f32;
+pub const WINDOW_TO_SCENE_HEIGHT_FACTOR: f32 = SCENE_HEIGHT / WINDOW_HEIGHT as f32;
+pub const WINDOW_TO_SCENE_DEPTH_FACTOR: f32 = SCENE_DEPTH / WINDOW_SCENE_DEPTH as f32;
+
+pub const AVERAGE_SCENE_FACTOR: f32 =
+    (WINDOW_TO_SCENE_WIDTH_FACTOR + WINDOW_TO_SCENE_HEIGHT_FACTOR + WINDOW_TO_SCENE_DEPTH_FACTOR)
+        / 3.0;
+pub static RENDER_RAY_FOCUS: Vec3 =
+    Vec3::new(SCENE_WIDTH / 2.0, SCENE_HEIGHT / 2.0, -2.0 * SCENE_DEPTH);
+
+// IoR of air
+pub const DEFAULT_REFRACTION_INDEX: f32 = 1.000293;

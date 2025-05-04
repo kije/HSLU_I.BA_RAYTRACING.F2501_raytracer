@@ -1,6 +1,6 @@
 use crate::float_ext::AbsDiffEq;
-use crate::geometry::TriangleData;
 use crate::geometry::composite::CompositeGeometry;
+use crate::geometry::{HasRenderObjectId, RenderObjectId, TriangleData};
 use crate::helpers::ColorType;
 use crate::raytracing::Material;
 use crate::simd_compat::SimdValueRealSimplified;
@@ -20,6 +20,7 @@ pub struct BoundedPlane<V: Vector<Scalar: SimdValueRealSimplified>> {
     height: V::Scalar,
     depth: V::Scalar,
     pub material: Material<V::Scalar>,
+    object_id: RenderObjectId<V::Scalar>,
 }
 
 impl<V: RenderingVector> BoundedPlane<V> {
@@ -80,6 +81,7 @@ impl<V: RenderingVector> BoundedPlane<V> {
             height,
             depth,
             material,
+            object_id: RenderObjectId::new(),
         }
     }
 
@@ -125,6 +127,15 @@ impl<V: RenderingVector> BoundedPlane<V> {
     }
 }
 
+impl<V> HasRenderObjectId<V::Scalar> for BoundedPlane<V>
+where
+    V: Vector<Scalar: SimdValueRealSimplified>,
+{
+    fn get_render_object_id(&self) -> RenderObjectId<V::Scalar> {
+        self.object_id
+    }
+}
+
 impl<V> CompositeGeometry<V> for BoundedPlane<V>
 where
     V: SimdRenderingVector + VectorFixedDimensions<3>,
@@ -147,21 +158,27 @@ where
             (self.depth * half, self.normal),
         ] {
             let offset = depth_offset_direction * V::broadcast(depth_offset);
-            triangles.push(TriangleData::with_material_and_normal(
-                triangle1.0 + offset,
-                triangle1.1 + offset,
-                triangle1.2 + offset,
-                normal,
-                self.material,
-            ));
+            triangles.push(
+                TriangleData::with_material_and_normal(
+                    triangle1.0 + offset,
+                    triangle1.1 + offset,
+                    triangle1.2 + offset,
+                    normal,
+                    self.material,
+                )
+                .with_object_id(self.object_id),
+            );
 
-            triangles.push(TriangleData::with_material_and_normal(
-                triangle2.0 + offset,
-                triangle2.1 + offset,
-                triangle2.2 + offset,
-                normal,
-                self.material,
-            ));
+            triangles.push(
+                TriangleData::with_material_and_normal(
+                    triangle2.0 + offset,
+                    triangle2.1 + offset,
+                    triangle2.2 + offset,
+                    normal,
+                    self.material,
+                )
+                .with_object_id(self.object_id),
+            );
         }
 
         // side plates
@@ -184,21 +201,15 @@ where
             )
             .triangulate();
 
-            triangles.push(TriangleData::with_material_and_normal(
-                t1.0,
-                t1.1,
-                t1.2,
-                normal,
-                self.material,
-            ));
+            triangles.push(
+                TriangleData::with_material_and_normal(t1.0, t1.1, t1.2, normal, self.material)
+                    .with_object_id(self.object_id),
+            );
 
-            triangles.push(TriangleData::with_material_and_normal(
-                t2.0,
-                t2.1,
-                t2.2,
-                normal,
-                self.material,
-            ));
+            triangles.push(
+                TriangleData::with_material_and_normal(t2.0, t2.1, t2.2, normal, self.material)
+                    .with_object_id(self.object_id),
+            );
         }
 
         triangles

@@ -1,4 +1,4 @@
-use crate::helpers::Pixel;
+use crate::helpers::{Pixel, gcd, gcd_lcm, lcm};
 use crate::image_buffer::ImageBuffer;
 
 use rayon::prelude::*;
@@ -15,15 +15,18 @@ use std::time::Duration;
 #[cfg(feature = "render_timing_debug")]
 use std::time::Instant;
 use std::{mem, thread};
+use ultraviolet::Vec3;
 
 mod raytracer_renderer;
 
 use crate::output::OutputColorEncoder;
-pub use raytracer_renderer::RaytracerRenderer;
+use crate::scene::Scene;
+use crate::{WINDOW_TO_SCENE_HEIGHT_FACTOR, WINDOW_TO_SCENE_WIDTH_FACTOR};
+pub use raytracer_renderer::{RaytracerRenderer, SCENE};
 
 pub struct RenderCoordinates {
-    x: usize,
-    y: usize,
+    x: f32,
+    y: f32,
 }
 
 pub struct RenderCoordinatesVectorized<'a> {
@@ -74,22 +77,26 @@ pub fn print_render_stats(render_times: &[f64]) {
     println!("Max: {}", render_times_stats.max().unwrap());
 }
 
-pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
+pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder>
+where
+    [(); W * H]:,
+{
     const RENDER_STRIDE: usize = const {
-        (W / 16)
-            .next_multiple_of(64 / mem::size_of::<u32>())
-            .next_multiple_of(8)
-        // align to vectorized x8 size and cache lines to avoid false sharing
+        // calculate a number that is a) optimal for SIMD-instructions (multiple of 8), b) a multiple of the cache line size to avoid false sharing and c) approximately divides thw window width
+        lcm(
+            ImageBuffer::<W, H>::U32_PER_CACHE_LINE * 3,
+            lcm(8, gcd(W, ImageBuffer::<W, H>::U32_PER_CACHE_LINE)),
+        )
     };
 
-    fn render(&self, buffer: &ImageBuffer<W, H>)
+    fn render(&self, buffer: &ImageBuffer<W, H>, scene: &Scene<Vec3>)
     where
         [(); W * H]:;
 
-    fn render_to_buffer<F>(buffer: &ImageBuffer<W, H>, cb: F)
+    fn render_to_buffer<F>(buffer: &ImageBuffer<W, H>, scene: &Scene<Vec3>, cb: F)
     where
         [(); W * H]:,
-        F: (Fn(RenderCoordinates) -> Option<Pixel>) + Sync,
+        F: (Fn(RenderCoordinates, &Scene<Vec3>) -> Option<Pixel>) + Sync,
     {
         #[cfg(feature = "render_timing_debug")]
         let render_times = Arc::new(Mutex::new(Vec::with_capacity(
@@ -99,15 +106,21 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
             #[cfg(feature = "render_timing_debug")]
             let render_times = render_times.clone();
 
-            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE / 3, |chunk| {
-                chunk.process_rows(|y, _, set_pixel_value| {
+            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE, |chunk| {
+                chunk.process_rows_parallel(|y, _, set_pixel_value| {
                     #[cfg(feature = "render_timing_debug")]
                     let start = Instant::now();
 
                     for i in (0..chunk.width()) {
                         let (x, y) = chunk.global_coordinates(i, y);
 
-                        if let Some(pixel_color) = cb(RenderCoordinates { x, y }) {
+                        if let Some(pixel_color) = cb(
+                            RenderCoordinates {
+                                x: x as f32 * WINDOW_TO_SCENE_WIDTH_FACTOR,
+                                y: y as f32 * WINDOW_TO_SCENE_HEIGHT_FACTOR,
+                            },
+                            scene,
+                        ) {
                             set_pixel_value(i, C::to_output(&pixel_color));
 
                             if cfg!(feature = "simulate_slow_render") {
@@ -130,11 +143,12 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
         }
     }
 
-    fn render_to_buffer_chunked_inplace<F>(buffer: &ImageBuffer<W, H>, cb: F)
+    fn render_to_buffer_chunked_inplace<F>(buffer: &ImageBuffer<W, H>, scene: &Scene<Vec3>, cb: F)
     where
         [(); W * H]:,
         F: Fn(
                 RenderCoordinatesVectorized,
+                &Scene<Vec3>,
                 &dyn Fn(usize, Pixel), // todo: callback shall also support depth ob intersected object at that point, enabling us to generate a depth map
             ) + Sync,
     {
@@ -146,9 +160,9 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
             #[cfg(feature = "render_timing_debug")]
             let render_times = render_times.clone();
 
-            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE / 3, |chunk| {
+            buffer.process_chunks_parallel(Self::RENDER_STRIDE, Self::RENDER_STRIDE, |chunk| {
                 // Cache-friendly approach: process row by row
-                chunk.process_rows(|y, _, set_pixel_value| {
+                chunk.process_rows_parallel(|y, _, set_pixel_value| {
                     #[cfg(feature = "render_timing_debug")]
                     let start = Instant::now();
 
@@ -157,7 +171,12 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
 
                     let (x, y): (Vec<_>, Vec<_>) = (0..chunk.width())
                         .map(|x| chunk.global_coordinates(x, y))
-                        .map(|(x, y)| (x as f32, y as f32))
+                        .map(|(x, y)| {
+                            (
+                                x as f32 * WINDOW_TO_SCENE_WIDTH_FACTOR,
+                                y as f32 * WINDOW_TO_SCENE_HEIGHT_FACTOR,
+                            )
+                        })
                         .collect();
 
                     let coordinates = RenderCoordinatesVectorized {
@@ -167,7 +186,7 @@ pub trait Renderer<const W: usize, const H: usize, C: OutputColorEncoder> {
                         z: &z,
                     };
 
-                    cb(coordinates, &|i, pixel| {
+                    cb(coordinates, scene, &|i, pixel| {
                         set_pixel_value(i, C::to_output(&pixel));
 
                         if cfg!(feature = "simulate_slow_render") {

@@ -100,9 +100,11 @@ impl<V> SimdValueSignedSimplified for V where
 }
 
 pub trait SimdValueRealSimplified:
-    SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
-    + SimdRealField
-    + AbsDiffEq<Output = Self::SimdBool>
+    SimdValueSignedSimplified<
+        Element: Float + AbsDiffEq<Output = bool, Epsilon = <Self as SimdValue>::Element>,
+        SimdBool: BitOps,
+    > + SimdRealField
+    + AbsDiffEq<Output = Self::SimdBool, Epsilon = Self>
     + palette::num::Real
     + palette::num::Sqrt
     + palette::num::Zero
@@ -122,9 +124,11 @@ pub trait SimdValueRealSimplified:
 }
 
 impl<V> SimdValueRealSimplified for V where
-    V: SimdValueSignedSimplified<Element: Float, SimdBool: BitOps>
-        + SimdRealField
-        + AbsDiffEq<Output = Self::SimdBool>
+    V: SimdValueSignedSimplified<
+            Element: Float + AbsDiffEq<Output = bool, Epsilon = <Self as SimdValue>::Element>,
+            SimdBool: BitOps,
+        > + SimdRealField
+        + AbsDiffEq<Output = Self::SimdBool, Epsilon = Self>
         + palette::num::Real
         + palette::num::Sqrt
         + palette::num::Zero

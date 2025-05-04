@@ -5,6 +5,10 @@ use crate::scene::lighting::Lightable;
 use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{SimdCapableVector, Vector, VectorAware};
 use crate::vector_traits::{RenderingVector, SimdRenderingVector};
+use crate::{
+    WINDOW_TO_SCENE_DEPTH_FACTOR, WINDOW_TO_SCENE_HEIGHT_FACTOR, WINDOW_TO_SCENE_WIDTH_FACTOR,
+};
+use fast_poisson::{Poisson2D, Poisson3D};
 use itertools::Itertools;
 use num_traits::{One, Zero};
 use palette::bool_mask::BoolMask;
@@ -13,6 +17,7 @@ use simba::scalar::SupersetOf;
 use simba::simd::SimdComplexField;
 use simba::simd::SimdRealField;
 use simba::simd::{SimdPartialOrd, SimdValue};
+use ultraviolet::Vec3;
 
 #[derive(Debug, Copy, Clone)]
 pub struct LightContribution<S: SimdValueRealSimplified> {
@@ -176,20 +181,40 @@ where
 
     pub fn to_point_light_cloud<const N: usize>(&self) -> [Self; N]
     where
+        V: SimdCapableVector<SingleValueVector = Vec3>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
         if N == 1 {
             return [self.clone(); N];
         }
 
+        let cloud_radius = (1.375 + (N as f32 / 56.0));
+
         let scale = V::Scalar::from_subset(&(1.0 / N as f32));
-        let cloud_radius = V::broadcast(V::Scalar::from_subset(&(1.35 + (N as f32 / 72.0))));
+        let cloud_radius_v = V::broadcast(V::Scalar::from_subset(&cloud_radius));
+
+        let window_to_scene_scale = V::unit_x().mul_add(
+            V::broadcast(V::Scalar::from_subset(&WINDOW_TO_SCENE_WIDTH_FACTOR)),
+            V::unit_y().mul_add(
+                V::broadcast(V::Scalar::from_subset(&WINDOW_TO_SCENE_HEIGHT_FACTOR)),
+                V::unit_z() * V::broadcast(V::Scalar::from_subset(&WINDOW_TO_SCENE_DEPTH_FACTOR)),
+            ),
+        );
+        let random_points = Poisson3D::new()
+            .with_dimensions([cloud_radius, cloud_radius, cloud_radius], (1.0 / N as f32))
+            .with_samples(N as u32);
 
         (0..N)
-            .map(|_| {
+            .zip(
+                random_points
+                    .iter()
+                    .map(|p| V::splat(Vec3::new(p[0], p[1], p[2])))
+                    .pad_using(N, |_| V::sample_random() * cloud_radius_v),
+            )
+            .map(|(_, random_point)| {
                 let mut l = self.clone();
 
-                l.position = l.position + (V::sample_random() * cloud_radius);
+                l.position = l.position + (random_point * window_to_scene_scale);
                 l.intensity = scale * l.intensity;
 
                 l
@@ -241,7 +266,7 @@ where
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
         let epsilon = V::Scalar::simd_default_epsilon();
-        let thousand = V::Scalar::from_subset(&50000.0); // Fixme strange hardcoded constant
+        let thousand = V::Scalar::from_subset(&0.95); // Fixme strange hardcoded constant
 
         let normal = lightable.get_surface_normal_at(point_position);
         let material = lightable.get_material_color_at(point_position);
@@ -254,12 +279,12 @@ where
         // Check if light is on the right side of the surface
         let incident_angle_pos = incident_light_angle_cos.simd_gt(zero);
 
-        let attenuation = thousand / (epsilon + light_distance + light_distance * light_distance);
+        let attenuation = thousand * (epsilon + light_distance + light_distance * light_distance);
 
         let att_sigmoid = attenuation.simd_tanh();
         // Calculate light intensity based on angle and distance
         let light_factor =
-            incident_light_angle_cos * self.intensity * att_sigmoid.simd_clamp(epsilon, one);
+            incident_light_angle_cos * self.intensity * att_sigmoid.simd_clamp(zero, one);
 
         LightContribution::new(
             ColorType::blend(

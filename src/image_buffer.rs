@@ -1,3 +1,6 @@
+use crate::random::pseudo_rng;
+use itertools::Itertools;
+use rand::prelude::SliceRandom;
 use rayon::prelude::*;
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -17,9 +20,9 @@ where
 {
     // Constants for cache-friendly processing
     // A typical cache line is 64 bytes which fits 16 u32 values
-    const CACHE_LINE_SIZE_BYTES: usize = 64;
-    const U32_SIZE_BYTES: usize = std::mem::size_of::<u32>();
-    const U32_PER_CACHE_LINE: usize = Self::CACHE_LINE_SIZE_BYTES / Self::U32_SIZE_BYTES;
+    pub const CACHE_LINE_SIZE_BYTES: usize = 64;
+    pub const U32_SIZE_BYTES: usize = std::mem::size_of::<u32>();
+    pub const U32_PER_CACHE_LINE: usize = Self::CACHE_LINE_SIZE_BYTES / Self::U32_SIZE_BYTES;
 
     pub const fn new() -> Self {
         ImageBuffer {
@@ -64,32 +67,32 @@ where
         // Process all chunks in parallel
         // Use chunks_y as the outer loop to maximize row-wise locality
         // FIXME: only one parallel iterator 0..(chunks_y * chunks_x) and then calculate chunk_y & chunk_x index via division and modulo
-        (0..(chunks_y * chunks_x))
-            .into_par_iter()
-            .for_each(|chunk_index| {
-                let chunk_x = chunk_index % chunks_x;
-                let chunk_y = chunk_index / chunks_x;
-                //(0..chunks_y).into_par_iter().for_each(|chunk_y| {
-                // (0..chunks_x).into_par_iter().for_each(|chunk_x| {
-                // Calculate actual chunk dimensions (may be smaller at edges)
-                let start_x = chunk_x * aligned_chunk_w;
-                let start_y = chunk_y * chunk_h;
-                let end_x = (start_x + aligned_chunk_w).min(W);
-                let end_y = (start_y + chunk_h).min(H);
+        let mut chunk_indexes = (0..(chunks_y * chunks_x)).collect_vec();
+        chunk_indexes.shuffle(&mut pseudo_rng());
+        chunk_indexes.into_par_iter().for_each(|chunk_index| {
+            let chunk_x = chunk_index % chunks_x;
+            let chunk_y = chunk_index / chunks_x;
+            //(0..chunks_y).into_par_iter().for_each(|chunk_y| {
+            // (0..chunks_x).into_par_iter().for_each(|chunk_x| {
+            // Calculate actual chunk dimensions (may be smaller at edges)
+            let start_x = chunk_x * aligned_chunk_w;
+            let start_y = chunk_y * chunk_h;
+            let end_x = (start_x + aligned_chunk_w).min(W);
+            let end_y = (start_y + chunk_h).min(H);
 
-                // Create a view of this chunk
-                let chunk_view = ChunkView {
-                    buffer: &self.buffer,
-                    width: W,
-                    start_x,
-                    start_y,
-                    end_x,
-                    end_y,
-                };
+            // Create a view of this chunk
+            let chunk_view = ChunkView {
+                buffer: &self.buffer,
+                width: W,
+                start_x,
+                start_y,
+                end_x,
+                end_y,
+            };
 
-                // Process the chunk
-                f(chunk_view);
-            });
+            // Process the chunk
+            f(chunk_view);
+        });
         //});
     }
 
@@ -104,35 +107,49 @@ where
         F: Fn(ChunkView<W, H>) -> R + Send + Sync + Clone,
         R: Send,
     {
+        // Ensure chunk width is cache-line aligned to minimize false sharing
+        // Each row of a chunk should ideally start at a cache line boundary
+        let aligned_chunk_w =
+            if chunk_w % Self::U32_PER_CACHE_LINE != 0 && chunk_w > Self::U32_PER_CACHE_LINE {
+                // Round up to nearest multiple of U32_PER_CACHE_LINE
+                ((chunk_w + Self::U32_PER_CACHE_LINE - 1) / Self::U32_PER_CACHE_LINE)
+                    * Self::U32_PER_CACHE_LINE
+            } else {
+                chunk_w
+            };
+
         // Calculate number of chunks in each dimension
-        let chunks_x = (W + chunk_w - 1) / chunk_w;
+        let chunks_x = (W + aligned_chunk_w - 1) / aligned_chunk_w;
         let chunks_y = (H + chunk_h - 1) / chunk_h;
 
         // Process all chunks in parallel and collect results
-        (0..chunks_y)
+        let mut chunk_indexes = (0..(chunks_y * chunks_x)).collect_vec();
+        chunk_indexes.shuffle(&mut pseudo_rng());
+        chunk_indexes
             .into_par_iter()
-            .flat_map(|chunk_y| {
+            .map(|chunk_index| {
+                let chunk_x = chunk_index % chunks_x;
+                let chunk_y = chunk_index / chunks_x;
                 let f = f.clone();
-                (0..chunks_x).into_par_iter().map(move |chunk_x| {
-                    // Calculate actual chunk dimensions (may be smaller at edges)
-                    let start_x = chunk_x * chunk_w;
-                    let start_y = chunk_y * chunk_h;
-                    let end_x = (start_x + chunk_w).min(W);
-                    let end_y = (start_y + chunk_h).min(H);
 
-                    // Create a view of this chunk
-                    let chunk_view = ChunkView {
-                        buffer: &self.buffer,
-                        width: W,
-                        start_x,
-                        start_y,
-                        end_x,
-                        end_y,
-                    };
+                // Calculate actual chunk dimensions (may be smaller at edges)
+                let start_x = chunk_x * chunk_w;
+                let start_y = chunk_y * chunk_h;
+                let end_x = (start_x + chunk_w).min(W);
+                let end_y = (start_y + chunk_h).min(H);
 
-                    // Process the chunk and return result
-                    f(chunk_view)
-                })
+                // Create a view of this chunk
+                let chunk_view = ChunkView {
+                    buffer: &self.buffer,
+                    width: W,
+                    start_x,
+                    start_y,
+                    end_x,
+                    end_y,
+                };
+
+                // Process the chunk and return result
+                f(chunk_view)
             })
             .collect()
     }
@@ -282,6 +299,24 @@ where
             // Process this row
             f(y, &get_row, &set_row);
         }
+    }
+
+    // Process the chunk row by row without creating separate row objects
+    // This is safer and avoids lifetime issues
+    pub fn process_rows_parallel<F>(&self, f: F)
+    where
+        F: FnMut(usize, &dyn Fn(usize) -> u32, &dyn Fn(usize, u32)) + Clone + Send + Sync,
+    {
+        (0..self.height()).into_par_iter().for_each(|y| {
+            // Create closure for getting values from this row
+            let get_row = |x: usize| self.get(x, y);
+
+            // Create closure for setting values in this row
+            let set_row = |x: usize, value: u32| self.set(x, y, value);
+
+            // Process this row
+            f.clone()(y, &get_row, &set_row);
+        });
     }
 }
 

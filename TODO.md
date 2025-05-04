@@ -1,0 +1,1 @@
+- investigate use of SimdOption from simba

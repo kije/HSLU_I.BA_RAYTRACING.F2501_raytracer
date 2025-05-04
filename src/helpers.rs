@@ -140,6 +140,35 @@ pub const fn fast_inverse(value: f32) -> f32 {
     f32::from_bits(0x7f00_0000 - value.to_bits())
 }
 
+#[inline(always)]
+pub const fn gcd(mut n: usize, mut m: usize) -> usize {
+    assert!(n != 0 && m != 0);
+    while m != 0 {
+        if m < n {
+            std::mem::swap(&mut m, &mut n);
+        }
+        m %= n;
+    }
+    n
+}
+
+#[inline(always)]
+pub const fn gcd_lcm(n: usize, m: usize) -> (usize, usize) {
+    if n == 0 && m == 0 {
+        return (0, 0);
+    }
+    let gcd = gcd(n, m);
+    // should not have to recalculate abs
+    let lcm = (n * (m / gcd));
+    (gcd, lcm)
+}
+
+#[inline(always)]
+pub const fn lcm(n: usize, m: usize) -> usize {
+    let (_, lcm) = gcd_lcm(n, m);
+    lcm
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -161,5 +190,32 @@ mod test {
                 (v_inv - v_inv_fast).abs()
             );
         }
+    }
+
+    #[test]
+    fn test_gcd() {
+        // Simple greatest common divisor.
+        assert_eq!(gcd(3, 5), 1);
+        assert_eq!(gcd(14, 15), 1);
+
+        // More complex greatest common divisor.
+        assert_eq!(gcd(2 * 3 * 5 * 11 * 17, 3 * 7 * 11 * 13 * 19), 3 * 11);
+    }
+
+    #[test]
+    fn test_multiple_gcd() {
+        // List of numbers.
+        let numbers: [usize; 4] = [3, 9, 21, 81];
+        // Compute divisor one after the other.
+        // Method 1: Using for-loop.
+        let mut divisor = numbers[0];
+        for no in &numbers[1..] {
+            divisor = gcd(divisor, *no);
+        }
+        assert_eq!(divisor, 3);
+
+        // Method 2: Using iterator & fold.
+        let divisor: usize = numbers.iter().fold(numbers[0], |acc, &x| gcd(acc, x));
+        assert_eq!(divisor, 3);
     }
 }

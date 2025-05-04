@@ -35,6 +35,8 @@ pub trait VectorAssociations: Vector {
 pub trait VectorOperations: Vector {
     fn broadcast(val: Self::Scalar) -> Self;
 
+    fn from_element(val: <Self::Scalar as SimdValue>::Element) -> Self;
+
     fn dot(&self, other: Self) -> Self::Scalar;
     fn mag_sq(&self) -> Self::Scalar;
 
@@ -79,6 +81,8 @@ pub trait Vector3DOperations: VectorAssociations {
     fn cross(&self, other: Self) -> Self;
     fn wedge(&self, other: Self) -> Self::Bivec;
     fn geom(&self, other: Self) -> Self::Rotor;
+
+    fn default_epsilon_distance() -> Self;
 }
 
 pub trait VectorAccessorX: Vector {
@@ -131,7 +135,7 @@ pub trait SimdCapableVector:
                 + Splatable<<<Self as SimdCapableVector>::SingleValueVector as Vector>::Scalar>,
 >
 {
-    type SingleValueVector: Vector;
+    type SingleValueVector: Vector + VectorFixedLanes<1>;
     /// Blend two vectors together lanewise using `mask` as a mask.
     ///
     /// This is essentially a bitwise blend operation, such that any point where
@@ -164,6 +168,10 @@ pub trait VectorFixedDimensions<const DIMENSIONS: usize>: Vector {
     const DIMENSIONS: usize = DIMENSIONS;
 
     fn from_components(components: [Self::Scalar; DIMENSIONS]) -> Self;
+    fn from_scalar_components(
+        vals: [[<<Self as Vector>::Scalar as SimdValue>::Element;
+            <<Self as Vector>::Scalar as SimdValue>::LANES]; DIMENSIONS],
+    ) -> Self;
 }
 
 pub trait VectorFixedLanes<const LANES: usize>: Vector {
@@ -323,23 +331,28 @@ macro_rules! impl_vector {
             }
         }
 
-        impl crate::float_ext::AbsDiffEq for $vec {
-            type Epsilon = <$scalar_type as crate::float_ext::AbsDiffEq>::Epsilon;
-            type Output = <$scalar_type as crate::float_ext::AbsDiffEq>::Output;
+        impl crate::float_ext::AbsDiffEq for $vec where <Self as Vector>::Scalar: crate::float_ext::AbsDiffEq {
+            type Epsilon = $vec;
+            type Output = <<Self as Vector>::Scalar as crate::float_ext::AbsDiffEq>::Output;
 
+            #[inline(always)]
             fn default_epsilon() -> Self::Epsilon {
-                <$scalar_type as crate::float_ext::AbsDiffEq>::default_epsilon()
+                let eps = <<Self as Vector>::Scalar as crate::float_ext::AbsDiffEq>::default_epsilon();
+
+                $vec::broadcast(impl_vector!(@cast_simd_value  $scalar_type, $inner_scalar, eps))
             }
 
+            #[inline(always)]
             fn abs_diff_eq(&self, other: &Self, epsilon: Self::Epsilon) -> Self::Output {
                  $(
                     ({
                         let c_other = other.$component;
                         let c_self = self.$component;
+                        let c_sepsilon = epsilon.$component;
                         let res: <<$vec as Vector>::Scalar as SimdValue>::SimdBool = crate::float_ext::AbsDiffEq::abs_diff_eq(
                             &impl_vector!(@cast_simd_value  $inner_scalar, $scalar_type, c_self),
                             &impl_vector!(@cast_simd_value  $inner_scalar, $scalar_type, c_other),
-                            epsilon
+                            impl_vector!(@cast_simd_value  $inner_scalar, $scalar_type, c_sepsilon),
                         );
                         res
                     }) &
@@ -384,6 +397,14 @@ macro_rules! impl_vector {
             fn broadcast(val: Self::Scalar) -> Self {
                 Self::broadcast(
                     impl_vector!(@cast_simd_value $scalar_type, $inner_scalar, val)
+                )
+            }
+
+            #[inline(always)]
+            fn from_element(val: <Self::Scalar as SimdValue>::Element) -> Self {
+                let spaltted = <Self::Scalar as SimdValue>::splat(val);
+                Self::broadcast(
+                    impl_vector!(@cast_simd_value  $scalar_type, $inner_scalar, spaltted)
                 )
             }
 
@@ -497,12 +518,31 @@ macro_rules! impl_vector {
             }
         }
 
+
         impl crate::vector::VectorFixedDimensions<$dims> for $vec {
             #[inline(always)]
             fn from_components(components: [Self::Scalar; $dims]) -> Self {
                 Self::from(
                     impl_vector!(@cast_simd_value [$scalar_type;$dims], [$inner_scalar;$dims], components)
                 )
+            }
+
+            #[inline(always)]
+            fn from_scalar_components(vals: [[<<Self as Vector>::Scalar as SimdValue>::Element; <<Self as Vector>::Scalar as SimdValue>::LANES]; $dims]) -> Self {
+                tt_if!{
+                    condition = [{tt_equal}]
+                    input = [{ $lanes 1 }]
+                    true = [{
+                        Self::from(
+                            vals.map(|vals|  <$inner_scalar>::from(vals[0]))
+                        )
+                    }]
+                    false = [{
+                        Self::from(
+                            vals.map(|vals|  <$inner_scalar>::from(vals))
+                        )
+                    }]
+                }
             }
         }
         impl crate::vector::VectorFixedLanes<$lanes> for $vec {
@@ -585,9 +625,11 @@ macro_rules! impl_vector {
             }
 
             impl crate::vector::RotatableVector for $vec {
+                #[inline(always)]
                fn rotate_by(&mut self, rotor: Self::Rotor) {
                    $vec::rotate_by(self, rotor);
                }
+                #[inline(always)]
                 fn rotated_by(self, rotor: Self::Rotor) -> Self {
                    $vec::rotated_by(self, rotor)
                }
@@ -595,23 +637,31 @@ macro_rules! impl_vector {
 
             if_three!($dims =>
                 impl crate::vector::Vector3DOperations for $vec {
+                #[inline(always)]
                     fn cross(&self, other: Self) -> Self {
                          $vec::cross(
                             self,
                             other
                         )
                     }
+                #[inline(always)]
                     fn wedge(&self, other: Self) -> Self::Bivec {
                          $vec::wedge(
                             self,
                             other
                         )
                     }
+                #[inline(always)]
                     fn geom(&self, other: Self) -> Self::Rotor {
                         $vec::geom(
                             self,
                             other
                         )
+                    }
+                #[inline(always)]
+                    fn default_epsilon_distance() -> Self {
+                        use crate::float_ext::AbsDiffEq;
+                        $vec::default_epsilon() * $vec::from_element(10.0)
                     }
                 }
             );

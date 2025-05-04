@@ -66,55 +66,47 @@ impl Raytracer {
             from,
             direction,
             TransmissionProperties::new(<V as Vector>::Scalar::one(), start_refraction_index),
-            <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(false),
+            <<<V as Vector>::Scalar as SimdValue>::SimdBool as SimdValue>::splat(true),
         );
 
-        // fixme why?
-        // For SIMD rays, we process each geometry type separately and find the nearest
         let mut nearest_interaction: Option<SurfaceInteraction<V>> = None;
 
-        let grouped_by_kind = check_objects
-            .keys()
-            .map(|&kind| check_objects.get_by_kind(kind));
+        for object in check_objects.get_all() {
+            let object = RenderGeometry::<V>::splat(object);
 
-        for objects in grouped_by_kind {
-            for object in objects {
-                let object = RenderGeometry::<V>::splat(object);
-
-                // Check intersection
-                if let Some(interaction) = object.intersect(&ray) {
-                    if interaction.valid_mask.none() {
-                        continue;
-                    }
-
-                    // Update nearest interaction
-                    nearest_interaction = match nearest_interaction {
-                        None => Some(interaction),
-                        Some(ref current) => {
-                            let closer = interaction.distance.simd_le(current.distance)
-                                & interaction.valid_mask;
-
-                            if closer.none() {
-                                Some(SurfaceInteraction::blend(
-                                    current.valid_mask,
-                                    current,
-                                    &interaction,
-                                ))
-                            } else if closer.all() {
-                                Some(interaction)
-                            } else {
-                                let pick_old_mask = (interaction.valid_mask & !current.valid_mask)
-                                    | (interaction.valid_mask & current.valid_mask & closer);
-
-                                Some(SurfaceInteraction::blend(
-                                    pick_old_mask,
-                                    &interaction,
-                                    current,
-                                ))
-                            }
-                        }
-                    };
+            // Check intersection
+            if let Some(interaction) = object.intersect(&ray) {
+                if interaction.valid_mask.none() {
+                    continue;
                 }
+
+                // Update nearest interaction
+                nearest_interaction = match nearest_interaction {
+                    None => Some(interaction),
+                    Some(ref current) => {
+                        let closer =
+                            interaction.distance.simd_le(current.distance) & interaction.valid_mask;
+
+                        if closer.none() {
+                            Some(SurfaceInteraction::blend(
+                                current.valid_mask,
+                                current,
+                                &interaction,
+                            ))
+                        } else if closer.all() {
+                            Some(interaction)
+                        } else {
+                            let pick_old_mask = (interaction.valid_mask & !current.valid_mask)
+                                | (interaction.valid_mask & current.valid_mask & closer);
+
+                            Some(SurfaceInteraction::blend(
+                                pick_old_mask,
+                                &interaction,
+                                current,
+                            ))
+                        }
+                    }
+                };
             }
         }
 

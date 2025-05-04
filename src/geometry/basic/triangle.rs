@@ -1,5 +1,6 @@
-use crate::geometry::Ray;
+use crate::float_ext::AbsDiffEq;
 use crate::geometry::basic::BasicGeometry;
+use crate::geometry::{HasRenderObjectId, Ray, RenderObjectId, SphereData};
 use crate::helpers::{ColorType, Splatable};
 use crate::matrix::{MatrixFixedDimensions, MatrixOperations};
 use crate::raytracing::Intersectable;
@@ -43,6 +44,7 @@ pub struct TriangleData<V: Vector<Scalar: SimdValueRealSimplified>> {
 
     /// Material for the triangle's surface
     pub material: Material<V::Scalar>,
+    object_id: RenderObjectId<V::Scalar>,
 }
 
 impl<V> VectorAware<V> for TriangleData<V> where V: Vector<Scalar: SimdValueRealSimplified> {}
@@ -72,10 +74,11 @@ impl<V: RenderingVector> TriangleData<V> {
             edge2,
             normal,
             material,
+            object_id: RenderObjectId::new(),
         }
     }
 
-    pub(in super::super) fn with_material_and_normal(
+    pub fn with_material_and_normal(
         vertex1: V,
         vertex2: V,
         vertex3: V,
@@ -94,7 +97,27 @@ impl<V: RenderingVector> TriangleData<V> {
             edge2,
             normal,
             material,
+            object_id: RenderObjectId::new(),
         }
+    }
+
+    pub fn get_center(&self) -> V {
+        (self.vertex1 + self.vertex2 + self.vertex3)
+            * V::broadcast(V::Scalar::from_subset(&3.0).simd_recip())
+    }
+
+    pub(in super::super) fn with_object_id(mut self, object_id: RenderObjectId<V::Scalar>) -> Self {
+        self.object_id = object_id;
+        self
+    }
+}
+
+impl<V> HasRenderObjectId<V::Scalar> for TriangleData<V>
+where
+    V: Vector<Scalar: SimdValueRealSimplified>,
+{
+    fn get_render_object_id(&self) -> RenderObjectId<V::Scalar> {
+        self.object_id
     }
 }
 
@@ -111,6 +134,7 @@ where
             edge2: V::splat(v.edge2),
             normal: V::splat(v.normal),
             material: Splatable::splat(&v.material),
+            object_id: RenderObjectId::from(V::Scalar::from_subset(&v.object_id.id())),
         }
     }
 }
@@ -133,7 +157,7 @@ impl<
 
         let mat = V::Matrix::from_columns([ray.direction, -edge1, -edge2]);
 
-        // happy path - just assume our matrix is invertible without checking it's determinant
+        // fixme can we avoid calculating the determinant twice (once via inversed() and once in determinant())?
         let mat_inverse = mat.inversed();
 
         let mat_det = mat.determinant();
@@ -166,6 +190,7 @@ impl<
             t,
             self.material.clone(),
             valid_mask,
+            self.object_id,
         ))
     }
 }
