@@ -146,6 +146,12 @@ where
     pub fn get_all(&self) -> impl Iterator<Item = &RenderGeometry<V>> {
         self.geometries.values().flat_map(|v| v.iter())
     }
+
+    pub fn merge(&mut self, other: &Self) {
+        for obj in other.get_all() {
+            self.add(obj.clone());
+        }
+    }
 }
 
 impl<V: Vector<Scalar: SimdValueRealSimplified>> Deref for GeometryCollection<V> {
