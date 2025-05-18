@@ -5,12 +5,14 @@ use crate::image_buffer::ImageBuffer;
 use crate::output::OutputColorEncoder;
 use crate::renderer::{RenderCoordinates, RenderCoordinatesVectorized, Renderer};
 use crate::{
-    DEFAULT_REFRACTION_INDEX, RENDER_RAY_FOCUS, SCENE_DEPTH, SCENE_HEIGHT, SCENE_WIDTH,
-    WINDOW_HEIGHT, WINDOW_TO_SCENE_HEIGHT_FACTOR, WINDOW_TO_SCENE_WIDTH_FACTOR, WINDOW_WIDTH,
+    AVERAGE_SCENE_FACTOR, DEFAULT_REFRACTION_INDEX, RENDER_RAY_FOCUS, SCENE_DEPTH, SCENE_HEIGHT,
+    SCENE_WIDTH, WINDOW_HEIGHT, WINDOW_TO_SCENE_HEIGHT_FACTOR, WINDOW_TO_SCENE_WIDTH_FACTOR,
+    WINDOW_WIDTH,
 };
 use itertools::{Itertools, izip};
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
+use simba::simd::SimdRealField;
 use simba::simd::{SimdComplexField, SimdOption, WideF32x4, WideF32x8};
 
 // Import the consolidated traits
@@ -29,7 +31,7 @@ use crate::geometry::{
 use crate::raytracing::Raytracer;
 use crate::raytracing::SurfaceInteraction;
 use crate::raytracing::{Material, TransmissionProperties};
-use crate::scene::{AmbientLight, Light, PointLight, Scene};
+use crate::scene::{AmbientLight, Light, PointLight, Scene, SceneLightSource};
 use fast_poisson::Poisson2D;
 use num_traits::{One, Zero};
 use palette::Mix;
@@ -71,12 +73,12 @@ const RAYTRACE_REFRACTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
 const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
     if cfg!(feature = "high_quality") {
         if cfg!(feature = "extreme_quality") {
-            21
+            28
         } else {
-            14
+            18
         }
     } else {
-        6
+        8
     }
 } else {
     1
@@ -84,373 +86,21 @@ const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
 
 const ANTIALIASING_SAMPLES_PER_PIXEL: usize = if cfg!(feature = "high_quality") {
     if cfg!(feature = "extreme_quality") {
-        40
+        45
     } else {
-        24
+        27
     }
 } else {
     8
 };
 
-static LIGHTS: LazyLock<[PointLight<Vec3>; POINT_LIGHT_MULTIPLICATOR * 2]> = LazyLock::new(|| {
-    [
-        // PointLight::new(
-        //     Vec3::new(SCENE_WIDTH / 2.0, SCENE_HEIGHT / 1.8, 0.016 * SCENE_DEPTH),
-        //     ColorType::new(0.825, 0.675, 0.5),
-        //     0.15,
-        // ),
-        PointLight::new(
-            Vec3::new(SCENE_WIDTH / 3.5, SCENE_HEIGHT / 3.75, 0.025 * SCENE_DEPTH),
-            ColorType::new(0.825, 0.675, 0.45),
-            0.585,
-        ),
-        // PointLight::new(
-        //     Vec3::new(
-        //         SCENE_WIDTH / 1.22,
-        //         SCENE_HEIGHT / 2.9,
-        //         0.38 * SCENE_DEPTH,
-        //     ),
-        //     ColorType::new(0.78, 0.67, 0.45),
-        //     0.7,
-        // ),
-        // PointLight::new(
-        //     Vec3::new(SCENE_WIDTH - 80.0, SCENE_HEIGHT / 2.0, 0.125 * SCENE_DEPTH),
-        //     ColorType::new(1.0, 1.0, 1.0),
-        //     0.17,
-        // ),
-        // PointLight::new(
-        //     Vec3::new(SCENE_WIDTH / 2.5, (SCENE_HEIGHT / 5.0), 0.175 * SCENE_DEPTH),
-        //     ColorType::new(0.75, 0.56, 0.65),
-        //     0.3,
-        // ),
-        PointLight::new(
-            Vec3::new(SCENE_WIDTH / 2.0, (SCENE_HEIGHT / 2.0), 0.7 * SCENE_DEPTH),
-            ColorType::new(1.0, 1.0, 1.0),
-            0.75,
-        ),
-        // PointLight::new(
-        //     Vec3::new(SCENE_WIDTH / 4.0, (SCENE_HEIGHT / 6.0), 0.01 * SCENE_DEPTH),
-        //     ColorType::new(0.01, 0.5, 0.4),
-        //     0.25,
-        // ),
-        // PointLight::new(
-        //     Vec3::new(
-        //         (SCENE_WIDTH) / 1.25,
-        //         (SCENE_HEIGHT / 3.0),
-        //         0.09 * SCENE_DEPTH,
-        //     ),
-        //     ColorType::new(0.65, 0.2, 0.35),
-        //     0.25,
-        // ),
-        // PointLight::new(
-        //     Vec3::new((SCENE_WIDTH) / 2.0, SCENE_HEIGHT / 1.2, 0.12 * SCENE_DEPTH),
-        //     ColorType::new(0.5, 0.51, 0.5),
-        //     0.25,
-        // ),
-    ]
-    .map(|light| light.to_point_light_cloud::<{ POINT_LIGHT_MULTIPLICATOR }>())
-    .into_iter()
-    .flatten()
-    .collect_array::<{ POINT_LIGHT_MULTIPLICATOR * 2 }>()
-    .unwrap()
-});
-
-// Create a lazy-initialized GeometryCollection
-pub static SCENE: LazyLock<Scene<Vec3>> = LazyLock::new(|| {
-    let mut scene = Scene::<Vec3>::with_capacities(20);
-
-    // Add spheres
-    scene.add_sphere(SphereData::new(
-        Vec3::new(SCENE_WIDTH / 2.5, SCENE_HEIGHT / 2.75, 0.170 * SCENE_DEPTH),
-        0.070 * SCENE_DEPTH,
-        ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
-    ));
-
-    scene.add_sphere(SphereData::with_material(
-        Vec3::new(SCENE_WIDTH / 2.5, SCENE_HEIGHT / 1.5, 0.170 * SCENE_DEPTH),
-        0.070 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(255.0 / 255.0, 0.0 / 255.0, 0.0 / 255.0),
-            0.8,
-            0.0,
-            TransmissionProperties::none(),
-        ),
-    ));
-
-    // scene.add_sphere(SphereData::new(
-    //     Vec3::new(SCENE_WIDTH / 2.5, SCENE_HEIGHT / 2.5, 150.0),
-    //     90.0,
-    //     ColorType::new(0.0 / 255.0, 255.0 / 255.0, 0.0 / 255.0),
-    // ));
-
-    scene.add_sphere(SphereData::with_material(
-        Vec3::new(
-            1.9 * (SCENE_WIDTH / 2.5),
-            SCENE_HEIGHT / 2.8,
-            0.160 * SCENE_DEPTH,
-        ),
-        0.088 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(250.0 / 255.0, 255.0 / 255.0, 245.0 / 255.0),
-            0.01,
-            0.2,
-            TransmissionProperties::new(0.999, 1.5),
-        ),
-    ));
-    //
-    // scene.add_sphere(SphereData::with_material(
-    //     Vec3::new(
-    //         2.0 * (SCENE_WIDTH / 2.5),
-    //         2.0 * (SCENE_HEIGHT / 2.5),
-    //         250.0,
-    //     ),
-    //     120.0,
-    //     Material::new(
-    //         ColorType::new(158.0 / 255.0, 0.0 / 255.0, 255.0 / 255.0),
-    //         0.85,
-    //         0.25,
-    //     ),
-    // ));
-    //
-    // scene.add_sphere(SphereData::with_material(
-    //     Vec3::new(
-    //         1.25 * (SCENE_WIDTH / 2.5),
-    //         0.5 * (SCENE_HEIGHT / 2.5),
-    //         90.0,
-    //     ),
-    //     30.0,
-    //     Material::new(
-    //         ColorType::new(128.0 / 255.0, 210.0 / 255.0, 255.0 / 255.0),
-    //         1.0,
-    //         0.5,
-    //     ),
-    // ));
-    //
-    scene.add_sphere(SphereData::with_material(
-        Vec3::new(
-            SCENE_WIDTH / 2.5,
-            2.1 * (SCENE_HEIGHT / 2.5),
-            0.5 * SCENE_DEPTH,
-        ),
-        0.250 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(254.0 / 255.0, 255.0 / 255.0, 255.0 / 255.0),
-            0.5,
-            0.05,
-            TransmissionProperties::none(),
-        ),
-    ));
-    //
-    // scene.add_sphere(SphereData::new(
-    //     Vec3::new(
-    //         SCENE_WIDTH / 4.0,
-    //         3.0 * (SCENE_HEIGHT / 4.0),
-    //         20.0,
-    //     ),
-    //     10.0,
-    //     ColorType::new(255.0 / 255.0, 55.0 / 255.0, 77.0 / 255.0),
-    // ));
-    //
-    // scene.add_sphere(SphereData::new(
-    //     Vec3::new(
-    //         SCENE_WIDTH / 3.0,
-    //         3.0 * (SCENE_HEIGHT / 6.0),
-    //         30.0,
-    //     ),
-    //     25.0,
-    //     ColorType::new(55.0 / 255.0, 230.0 / 255.0, 180.0 / 255.0),
-    // ));
-
-    // Add triangles
-    scene.add_triangle(TriangleData::with_material(
-        Vec3::new(SCENE_WIDTH * 0.05, SCENE_HEIGHT * 0.2, 0.2 * SCENE_DEPTH),
-        Vec3::new(SCENE_WIDTH * 0.3, SCENE_HEIGHT * 0.5, 0.2 * SCENE_DEPTH),
-        Vec3::new(SCENE_WIDTH * 0.25, SCENE_HEIGHT * 0.15, 0.15 * SCENE_DEPTH),
-        Material::new(
-            ColorType::new(0.5, 0.7, 0.8),
-            0.001,
-            0.2,
-            TransmissionProperties::new(0.999, 1.8),
-        ),
-    ));
-
-    scene.add_triangle(TriangleData::with_material(
-        Vec3::new(SCENE_WIDTH * 0.55, SCENE_HEIGHT * 0.45, 0.2 * SCENE_DEPTH),
-        Vec3::new(SCENE_WIDTH * 0.7, SCENE_HEIGHT * 0.72, 0.2 * SCENE_DEPTH),
-        Vec3::new(SCENE_WIDTH * 0.65, SCENE_HEIGHT * 0.35, 0.14 * SCENE_DEPTH),
-        Material::new(
-            ColorType::new(0.7, 0.7, 0.8),
-            0.1,
-            0.3,
-            TransmissionProperties::none(),
-        ),
-    ));
-
-    scene.add_triangle(TriangleData::with_material(
-        Vec3::new(SCENE_WIDTH * 0.7, SCENE_HEIGHT * 0.90, 0.2 * SCENE_DEPTH),
-        Vec3::new(SCENE_WIDTH * 0.55, SCENE_HEIGHT * 0.65, 0.2 * SCENE_DEPTH),
-        Vec3::new(SCENE_WIDTH * 0.65, SCENE_HEIGHT * 0.55, 0.14 * SCENE_DEPTH),
-        Material::new(
-            ColorType::new(0.7, 0.7, 0.8),
-            0.1,
-            0.3,
-            TransmissionProperties::new(1.0, 1.5),
-        ),
-    ));
-
-    let mut plane_up = Vec3::unit_y();
-    let mut plane_normal = -Vec3::unit_z();
-    plane_normal.rotate_by(Rotor3::from_rotation_yz(-0.555));
-    plane_up.rotate_by(Rotor3::from_rotation_yz(-0.555));
-
-    // Convert BoundedPlane to basic geometries and add them
-    let plane_triangles = BoundedPlane::with_material(
-        plane_normal,
-        Vec3::new(SCENE_WIDTH * 0.5, SCENE_HEIGHT * 0.45, 0.270 * SCENE_DEPTH),
-        plane_up,
-        SCENE_WIDTH * 0.55,
-        SCENE_HEIGHT * 0.55,
-        0.01 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.6, 0.7, 0.5),
-            0.075,
-            0.07,
-            TransmissionProperties::new(1.0, 1.5),
-        ),
-    )
-    .to_basic_geometries();
-
-    for triangle in plane_triangles {
-        scene.add_triangle(triangle);
-    }
-
-    let mut plane_up = Vec3::unit_y();
-    let mut plane_normal = -Vec3::unit_z();
-    plane_normal.rotate_by(Rotor3::from_rotation_xz(-0.9955));
-    plane_up.rotate_by(Rotor3::from_rotation_xz(-0.9955));
-
-    let plane_triangles = BoundedPlane::with_material(
-        plane_normal,
-        Vec3::new(SCENE_WIDTH * 0.82, SCENE_HEIGHT * 0.57, 0.110 * SCENE_DEPTH),
-        plane_up,
-        SCENE_WIDTH * 0.318,
-        SCENE_HEIGHT * 0.35,
-        0.007 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.99, 0.99, 0.99),
-            1.0,
-            0.2,
-            TransmissionProperties::none(),
-        ),
-    )
-    .to_basic_geometries();
-
-    for triangle in plane_triangles {
-        scene.add_triangle(triangle);
-    }
-
-    let back_plane_triangle = BoundedPlane::with_material(
-        -Vec3::unit_z(),
-        Vec3::new(SCENE_WIDTH * 0.5, SCENE_HEIGHT * 0.5, SCENE_DEPTH),
-        Vec3::unit_y(),
-        SCENE_WIDTH,
-        SCENE_HEIGHT,
-        0.001 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.5, 0.75, 0.75),
-            0.0,
-            0.0,
-            TransmissionProperties::none(),
-        ),
-    )
-    .to_basic_geometries();
-
-    let bottom_plane_triangle = BoundedPlane::with_material(
-        Vec3::unit_y(),
-        Vec3::new(SCENE_WIDTH * 0.5, SCENE_HEIGHT, SCENE_DEPTH as f32 * 0.5),
-        Vec3::unit_z(),
-        SCENE_WIDTH,
-        SCENE_DEPTH,
-        0.001 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.75, 0.5, 0.75),
-            0.0,
-            0.0,
-            TransmissionProperties::none(),
-        ),
-    )
-    .to_basic_geometries();
-
-    let top_plane_triangle = BoundedPlane::with_material(
-        -Vec3::unit_y(),
-        Vec3::new(SCENE_WIDTH * 0.5, 0.0, SCENE_DEPTH as f32 * 0.5),
-        Vec3::unit_z(),
-        SCENE_WIDTH,
-        SCENE_DEPTH,
-        0.001 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.75, 0.5, 0.75),
-            0.0,
-            0.0,
-            TransmissionProperties::none(),
-        ),
-    )
-    .to_basic_geometries();
-
-    let left_plane_triangle = BoundedPlane::with_material(
-        Vec3::unit_x(),
-        Vec3::new(0.0, SCENE_HEIGHT * 0.5, SCENE_DEPTH as f32 * 0.5),
-        Vec3::unit_z(),
-        SCENE_HEIGHT,
-        SCENE_DEPTH,
-        0.001 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.75, 0.75, 0.5),
-            0.0,
-            0.0,
-            TransmissionProperties::none(),
-        ),
-    )
-    .to_basic_geometries();
-
-    let right_plane_triangle = BoundedPlane::with_material(
-        -Vec3::unit_x(),
-        Vec3::new(SCENE_WIDTH, SCENE_HEIGHT * 0.5, SCENE_DEPTH as f32 * 0.5),
-        -Vec3::unit_z(),
-        SCENE_HEIGHT,
-        SCENE_DEPTH,
-        0.001 * SCENE_DEPTH,
-        Material::new(
-            ColorType::new(0.75, 0.75, 0.5),
-            0.0,
-            0.0,
-            TransmissionProperties::none(),
-        ),
-    )
-    .to_basic_geometries();
-
-    for triangles in [
-        back_plane_triangle,
-        bottom_plane_triangle,
-        top_plane_triangle,
-        left_plane_triangle,
-        right_plane_triangle,
-    ] {
-        for triangle in triangles {
-            scene.add_triangle(triangle);
-        }
-    }
-
-    scene
-});
-
 trait SceneLightIterator<'a, V: 'a + SimdRenderingVector>:
-    IntoIterator<Item = &'a PointLight<V::SingleValueVector>> + Clone + Sync
+    IntoIterator<Item: AsRef<SceneLightSource<V::SingleValueVector>>> + Clone + Sync
 {
 }
 
 impl<'a, T, V: 'a + SimdRenderingVector> SceneLightIterator<'a, V> for T where
-    T: IntoIterator<Item = &'a PointLight<V::SingleValueVector>> + Clone + Sync
+    T: IntoIterator<Item: AsRef<SceneLightSource<V::SingleValueVector>>> + Clone + Sync
 {
 }
 
@@ -494,7 +144,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             }
         }
         let zero = V::Scalar::zero();
-        let zero_color = ColorType::new(zero, zero, zero);
+        let zero_color = ColorSimdExt::zero();
 
         let (ray, nearest_interaction) = Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(
             coords,
@@ -507,15 +157,22 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             return None;
         }
 
-        let color = Self::calculate_lighting::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
-            &nearest_interaction,
-            ray.direction,
-            check_objects,
-            lights.clone(),
-        );
+        let (direct_light, specular_color): (ColorType<V::Scalar>, ColorType<V::Scalar>) =
+            Self::calculate_lighting::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
+                &nearest_interaction,
+                ray.direction,
+                start_refraction_index,
+                check_objects,
+                lights.clone(),
+            );
 
-        // fixme reflection and refractions can be calculated in parallel
-        let reflection_color = if cfg!(feature = "reflections") {
+        let distance_factor =
+            Self::attenuation_factor_based_on_distance::<V>(nearest_interaction.distance);
+        let direct_light = direct_light * distance_factor;
+        let specular_color = specular_color * distance_factor;
+
+        // fixme reflection and refractions can be calculated in parallel?
+        let reflection_color: ColorType<V::Scalar> = if cfg!(feature = "reflections") {
             Self::calculate_reflection::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, IS_REFRACTION_RAY, _>(
                 &nearest_interaction,
                 ray.direction,
@@ -528,7 +185,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             zero_color
         };
 
-        let refraction_color = if cfg!(feature = "refractions") {
+        let refraction_color: ColorType<V::Scalar> = if cfg!(feature = "refractions") {
             Self::calculate_refractions::<
                 IS_ANTIALIASING_RAY,
                 IS_REFLECTION_RAY,
@@ -546,17 +203,48 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             zero_color
         };
 
-        let color = ColorSimdExt::blend(
-            nearest_interaction.material.transmission.mask(),
-            &refraction_color,
-            &color,
+        // let color = ColorSimdExt::blend(
+        //     nearest_interaction.material.transmission.mask(),
+        //     &refraction_color,
+        //     &direct_light,
+        // );
+        //
+        // return Some((
+        //     color + reflection_color + refraction_color,
+        //     nearest_interaction.valid_mask,
+        //     nearest_interaction,
+        // ));
+
+        let is_transmissive = nearest_interaction.material.transmission.mask();
+
+        let blend_color: ColorType<V::Scalar> = ColorSimdExt::blend(
+            is_transmissive,
+            // For transparent materials, directly add reflection and refraction
+            &(reflection_color + refraction_color + specular_color),
+            // For opaque surfaces, direct lighting plus reflection
+            &(direct_light + reflection_color),
         );
 
         Some((
-            color + reflection_color + refraction_color,
+            blend_color,
             nearest_interaction.valid_mask,
             nearest_interaction,
         ))
+    }
+
+    fn attenuation_factor_based_on_distance<V: SimdRenderingVector>(
+        distance: V::Scalar,
+    ) -> V::Scalar {
+        let distance = distance.simd_abs();
+        let zero = V::Scalar::zero();
+        let one = V::Scalar::one();
+        let epsilon = V::Scalar::simd_default_epsilon();
+        let scale = V::Scalar::from_subset(&0.95);
+        let attenuation = scale * (epsilon + distance + distance * distance);
+
+        let att_sigmoid = (attenuation.simd_tanh() + one) / V::Scalar::from_subset(&2.0);
+
+        att_sigmoid.simd_clamp(zero, one)
     }
 
     fn calculate_refractions<
@@ -589,7 +277,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let material_is_refractive = interaction.material.transmission.mask();
 
         if interaction.valid_mask.none() || material_is_refractive.none() {
-            return ColorType::new(zero, zero, zero);
+            return ColorSimdExt::zero();
         }
 
         macro_rules! impl_refraction_raytrace {
@@ -655,19 +343,39 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let cos_theta = view_dir.dot(interaction.normal);
         let is_inside_object = cos_theta.simd_le(zero);
 
-        let inormal = V::blend(is_inside_object, interaction.normal, -interaction.normal);
+        let inormal = V::blend(is_inside_object, -interaction.normal, interaction.normal);
 
         let interaction_refraction_index =
             *interaction.material.transmission.refraction_index().value();
-        let new_medium_refraction_index = interaction_refraction_index
-            .select(is_inside_object, V::Scalar::from_subset(&1.000293));
 
-        let eta = (start_refraction_index / new_medium_refraction_index).select(
+        let new_medium_refraction_index = interaction_refraction_index.select(
             is_inside_object,
-            new_medium_refraction_index / start_refraction_index,
+            V::Scalar::from_subset(&DEFAULT_REFRACTION_INDEX),
         );
 
-        let refraction_direction = view_dir.refracted(inormal, eta).normalized();
+        let eta = (new_medium_refraction_index / start_refraction_index).select(
+            is_inside_object,
+            start_refraction_index / new_medium_refraction_index,
+        );
+
+        // // Check for total internal reflection
+        // let cos_theta_i = cos_theta.simd_abs();
+        // let sin_theta_t_squared = eta * eta * (one - cos_theta_i * cos_theta_i);
+        // let total_internal_reflection = sin_theta_t_squared.simd_ge(one);
+
+        //let reflection_direction = view_dir.reflected(interaction.normal).normalized();
+        let refraction_direction = view_dir
+            //.refracted_with_tir(-inormal, eta.simd_recip())
+            .refracted(-inormal, eta.simd_recip())
+            .normalized();
+
+        // let bsdf = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::one()
+        //     - interaction.material.bsdf(
+        //         inormal,
+        //         (-view_dir),
+        //         reflection_direction,
+        //         start_refraction_index,
+        //     );
 
         impl_refraction_raytrace! {
             let refraction_color = single_raytrace(
@@ -680,39 +388,54 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             )
         }
 
-        let (refraction, refraction_valid) = refraction_color
-            .map(|(refraction, refraction_valid, _)| (refraction, refraction_valid))
-            .unwrap_or((ColorType::<V::Scalar>::new(zero, zero, zero), bool_false));
+        let (refraction, refraction_valid, intersection_distance) = refraction_color
+            .map(|(refraction, refraction_valid, intersection)| {
+                (refraction, refraction_valid, intersection.distance)
+            })
+            .unwrap_or((ColorSimdExt::zero(), bool_false, zero));
 
-        let reflection_valid = refraction_valid & interaction.valid_mask & material_is_refractive;
+        // let absorption_coefficient = V::Scalar::from_subset(&0.05); // Adjust based on your scene scale
+        // // For colored glass, use color channels
+        // // let absorption_coefficient_rgb = interaction.material.color.to_vec3() * V::Scalar::from_subset(&0.1);
+        //
+        // // Apply absorption based on distance traveled inside the medium
+        // let transmittance = (-intersection_distance * absorption_coefficient).simd_exp();
+        // let refraction_with_absorption = refraction * transmittance;
 
-        let refraction_opacity = interaction
+        // let distance_factor =
+        //     Self::attenuation_factor_based_on_distance::<V>(intersection_distance);
+
+        let refraction_valid = refraction_valid & interaction.valid_mask & material_is_refractive;
+
+        let refraction_boost = interaction
             .material
             .transmission
-            .opacity()
-            .simd_unwrap_or(|| one)
-            .simd_clamp(zero, one - <V as Vector>::Scalar::default_epsilon());
+            .boost()
+            .simd_unwrap_or(|| zero)
+            + one;
 
-        let premultiplied_color = interaction
-            .material
-            .color
-            .premultiply(refraction_opacity)
-            .into_linear()
-            .multiply(refraction);
-        // FIXME variable names
-        let aaa = interaction
-            .material
-            .color
-            .premultiply(one - refraction_opacity)
-            .into_linear();
+        // let refraction_opacity = interaction
+        //     .material
+        //     .transmission
+        //     .opacity()
+        //     .simd_unwrap_or(|| one)
+        //     .simd_clamp(zero, one - <V as Vector>::Scalar::default_epsilon());
+        // let material_absorption = interaction.material.absorption();
 
-        let kkkk = aaa.mix(premultiplied_color, refraction_opacity);
+        let (_, transmittancenc) =
+            interaction
+                .material
+                .compute_fresnel(inormal, view_dir, eta.simd_recip());
 
-        ColorType::<V::Scalar>::blend(
-            reflection_valid,
-            &kkkk,
-            &ColorType::<V::Scalar>::new(zero, zero, zero),
-        )
+        let refracted_light =
+            //refraction_with_absorption * distance_factor * refraction_boost * bsdf;
+            //refraction  * refraction_boost * bsdf; // fixme implement this right
+            refraction  * refraction_boost * transmittancenc;
+
+        // Combine material color with refracted light based on opacity
+        //let final_refraction = material_absorption.mix(refracted_light, refraction_opacity);
+
+        ColorType::<V::Scalar>::blend(refraction_valid, &refracted_light, &ColorSimdExt::zero())
     }
 
     fn calculate_reflection<
@@ -738,18 +461,52 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         Standard: Distribution<<V as Vector>::Scalar>,
     {
         let zero = V::Scalar::zero();
+        let one = V::Scalar::one();
         let bool_false =
             <<<V as Vector>::Scalar as SimdValue>::SimdBool as BoolMask>::from_bool(false);
 
         if interaction.valid_mask.none() {
-            return ColorType::new(zero, zero, zero);
+            return ColorSimdExt::zero();
         }
 
-        let material_is_reflective = interaction.material.reflectivity.simd_gt(zero);
+        // for transmissive materials, see if we have total internal reflection
+        let cos_theta = view_dir.dot(interaction.normal);
+        let is_inside_object = cos_theta.simd_lt(zero);
+
+        let interaction_refraction_index =
+            *interaction.material.transmission.refraction_index().value();
+
+        let new_medium_refraction_index = interaction_refraction_index.select(
+            is_inside_object,
+            V::Scalar::from_subset(&DEFAULT_REFRACTION_INDEX),
+        );
+
+        let eta = (new_medium_refraction_index / start_refraction_index).select(
+            is_inside_object,
+            start_refraction_index / new_medium_refraction_index,
+        );
+        // Check for total internal reflection
+        let cos_theta_i = cos_theta.simd_abs();
+        let sin_theta_t_squared = eta * eta * (one - cos_theta_i * cos_theta_i);
+        let total_internal_reflection = sin_theta_t_squared.simd_ge(one);
+
+        let material_is_reflective = interaction.material.metallic.simd_gt(zero)
+            | (interaction.material.transmission.mask() & total_internal_reflection);
 
         if material_is_reflective.none() {
-            return ColorType::new(zero, zero, zero);
+            return ColorSimdExt::zero();
         }
+
+        let reflection_direction = view_dir.reflected(interaction.normal).normalized();
+
+        let inormal = V::blend(is_inside_object, -interaction.normal, interaction.normal);
+
+        let bsdf = interaction.material.bsdf(
+            inormal,
+            -view_dir,
+            reflection_direction,
+            start_refraction_index,
+        );
 
         macro_rules! impl_reflection_raytrace {
             (
@@ -811,8 +568,6 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             };
         }
 
-        let reflection_direction = view_dir.reflected(interaction.normal).normalized();
-
         let reflection_is_none = reflection_direction.abs_diff_eq_default(&V::broadcast(zero));
 
         impl_reflection_raytrace! {
@@ -826,28 +581,39 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             ) if (reflection_is_none.none())
         }
 
-        let (reflection, reflection_valid) = reflection_color
-            .map(|(refraction, refraction_valid, _)| (refraction, refraction_valid))
-            .unwrap_or((ColorType::<V::Scalar>::new(zero, zero, zero), bool_false));
+        let (reflection, reflection_valid, interaction_distance) = reflection_color
+            .map(|(refraction, refraction_valid, interaction)| {
+                (refraction, refraction_valid, interaction.distance)
+            })
+            .unwrap_or((ColorSimdExt::zero(), bool_false, zero));
 
         let reflection_valid = reflection_valid
             & interaction.valid_mask
             & material_is_reflective
             & !reflection_is_none;
 
-        ColorType::<V::Scalar>::blend(
+        let distance_factor = Self::attenuation_factor_based_on_distance::<V>(interaction_distance);
+
+        let (reflectance, _) =
+            interaction
+                .material
+                .compute_fresnel(inormal, -view_dir, start_refraction_index);
+
+        ColorSimdExt::blend(
             reflection_valid,
-            &(reflection * interaction.material.reflectivity),
-            &ColorType::<V::Scalar>::new(zero, zero, zero),
+            //&(reflection * distance_factor * bsdf), //&(reflection * interaction.material.metallic),
+            &(reflection * distance_factor * reflectance),
+            &ColorSimdExt::zero(),
         )
     }
 
     fn calculate_lighting<'a, const IS_ANTIALIASING_RAY: bool, const IS_REFLECTION_RAY: bool, V>(
         interaction: &SurfaceInteraction<V>,
         view_dir: V,
+        start_refraction_index: V::Scalar,
         check_objects: &GeometryCollection<V::SingleValueVector>,
         lights: impl SceneLightIterator<'a, V> + Send + 'static,
-    ) -> ColorType<V::Scalar>
+    ) -> (ColorType<V::Scalar>, ColorType<V::Scalar>)
     where
         V: 'a
             + SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector + Send>
@@ -860,12 +626,12 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let one = V::Scalar::one();
 
         if interaction.valid_mask.none() {
-            return ColorType::new(zero, zero, zero);
+            return (ColorSimdExt::zero(), ColorSimdExt::zero());
         }
 
         // Create ambient light
         let ambient_light =
-            AmbientLight::<V>::new(ColorType::new(one, one, one), V::Scalar::from_subset(&0.08));
+            AmbientLight::<V>::new(ColorSimdExt::one(), V::Scalar::from_subset(&0.08));
 
         // Get material color
         let material_color = interaction.material.color.clone();
@@ -874,15 +640,18 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let ambient_contribution = ColorType::blend(
             interaction.valid_mask,
             &(material_color.clone() * ambient_light.color),
-            &ColorType::<V::Scalar>::new(zero, zero, zero),
+            &ColorSimdExt::zero(),
         ) * ambient_light.intensity;
 
         // Calculate direct lighting from all point lights
-        let mut light_color = ColorType::<V::Scalar>::new(zero, zero, zero);
+        let mut light_color = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::zero();
+        let mut specular_color = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::zero();
 
         for light in lights.clone() {
             // Create SIMD light
-            let light = PointLight::<V>::splat(&light);
+            let light = match light.as_ref() {
+                SceneLightSource::PointLight(light) => PointLight::<V>::splat(&light),
+            };
 
             let light_position = light.position;
 
@@ -895,17 +664,28 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 interaction.point + (light_dir * V::default_epsilon_distance()); // move point a bit away from the surface of the object
             let check_for_light_blocking_light_to_point =
                 light_position - check_for_light_blocking_point;
-            let light_can_reach_point = (!Raytracer::has_any_intersection(
+
+            let obstacles_in_path_to_light = Raytracer::has_any_intersection(
                 check_for_light_blocking_point,
                 light_dir,
                 check_objects,
                 check_for_light_blocking_light_to_point.mag(),
-            )) & interaction.valid_mask;
+            );
+            let light_can_reach_point =
+                !obstacles_in_path_to_light.completely_occluded & interaction.valid_mask;
+
+            if light_can_reach_point.none() {
+                continue;
+            }
 
             let contribution =
                 light.calculate_contribution_at(interaction, interaction.point, view_dir);
 
-            let light_color_simd = contribution.color;
+            let light_color_simd = ColorSimdExt::blend(
+                light_can_reach_point,
+                &(contribution.color/* / obstacles_in_path_to_light.color_filter */), // fixme
+                &contribution.color,
+            );
             let light_intensity = contribution.intensity;
 
             // Calculate diffuse factor
@@ -919,28 +699,51 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 .dot(view_dir)
                 .simd_max(zero)
                 .simd_powf(
-                    (interaction.material.shininess * V::Scalar::from_subset(&(512.0)))
+                    (interaction.material.shininess() * V::Scalar::from_subset(&(512.0)))
                         .simd_max(V::Scalar::one()),
                 );
 
             let specular = specular_factor.select(
-                interaction.material.shininess.simd_gt(V::Scalar::zero()),
+                interaction.material.shininess().simd_gt(V::Scalar::zero()),
                 V::Scalar::zero(),
             );
             // Combined lighting for this light
-            let light_factor = (diffuse_factor) * light_intensity;
-
-            let specular_light = light.color * specular * light_intensity;
+            let light_factor = (diffuse_factor)
+                * light_intensity
+                * obstacles_in_path_to_light
+                    .combined_opacity
+                    .select(light_can_reach_point, one);
+            let specular_factor = light_intensity
+                * obstacles_in_path_to_light
+                    .combined_opacity
+                    .select(light_can_reach_point, one);
 
             // Only apply light where the surface faces the light & is not blocked by the light
             let light_valid = diffuse_factor.simd_gt(zero) & light_can_reach_point;
+
+            // let bsdf = interaction
+            //     .material
+            //     .bsdf(interaction.normal, -view_dir, light_dir, one);
+
+            let specular_light = light.color * specular;
+
+            let diffuse_contribution = material_color * light_color_simd * light_factor;
+            let specular_contribution = specular_light * specular_factor;
+
+            //println!("bsdf: {:?}", bsdf);
 
             // Add light contribution
             light_color = light_color
                 + ColorType::blend(
                     light_valid & interaction.valid_mask,
-                    &((light_color_simd * light_factor) + specular_light),
-                    &ColorType::<V::Scalar>::new(zero, zero, zero),
+                    &(diffuse_contribution + specular_contribution),
+                    &ColorSimdExt::zero(),
+                );
+            specular_color = specular_color
+                + ColorType::blend(
+                    light_valid & interaction.valid_mask,
+                    &(specular_contribution),
+                    &ColorSimdExt::zero(),
                 );
         }
 
@@ -960,30 +763,44 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         }
 
         // Combine ambient and direct lighting
-        ambient_contribution + light_color
+        (ambient_contribution + light_color, specular_color)
     }
 
-    fn get_antialiasing_simpling_directions<V>() -> (V, V, V, V)
+    fn get_antialiasing_simpling_directions<V>() -> (V, V, V, V, V, V, V, V)
     where
         V: SimdRenderingVector<SingleValueVector: RenderingVector + NormalizableVector>,
     {
-        let rotate_angle = (0.5f32).atan();
+        let (x_r, y_r) = if cfg!(feature = "anti_aliasing_rotation_scale") {
+            let rotate_angle = (0.5f32).atan();
 
-        let sin = V::broadcast(V::Scalar::from_subset(&(rotate_angle.sin())));
-        let cos = V::broadcast(V::Scalar::from_subset(&(rotate_angle.cos())));
+            let sin = V::broadcast(V::Scalar::from_subset(&(rotate_angle.sin())));
+            let cos = V::broadcast(V::Scalar::from_subset(&(rotate_angle.cos())));
 
-        let x = V::unit_x() * V::broadcast(V::Scalar::from_subset(&(rotate_angle.cos())));
-        let y = V::unit_y() * V::broadcast(V::Scalar::from_subset(&(rotate_angle.sin())));
+            let x = V::unit_x();
+            let y = V::unit_y();
 
-        let x_r = x.mul_add(cos, y * sin);
-        let y_r = x.mul_add(-sin, y * cos);
+            let x_r = x.mul_add(cos, y * sin);
+            let y_r = x.mul_add(-sin, y * cos);
 
-        let tl = -x_r - y_r;
-        let tr = x_r - y_r;
-        let bl = -x_r + y_r;
-        let br = x_r + y_r;
+            (x_r, y_r)
+        } else {
+            (V::unit_x(), V::unit_y())
+        };
+
+        let t = -y_r;
+        let l = -x_r;
+        let r = x_r;
+        let b = y_r;
+        let tl = t + l;
+        let tr = t + r;
+        let bl = b + l;
+        let br = b + r;
 
         (
+            t.normalized(),
+            l.normalized(),
+            b.normalized(),
+            r.normalized(),
             tl.normalized(),
             tr.normalized(),
             bl.normalized(),
@@ -1018,7 +835,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let (initial_coords, mut rest_coordinates) =
             (sample_coordinates[0], &sample_coordinates[1..]);
-        let default_color = ColorType::new(zero, zero, zero);
+        let default_color = ColorSimdExt::zero();
         let default_mask = bool_false;
         let (initial_color, initial_mask, interaction) =
             Self::single_raytrace::<false, false, false, V>(
@@ -1032,27 +849,22 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             .map(|(c, m, interaction)| (c, m, Some(interaction)))
             .unwrap_or((default_color, default_mask, None));
 
-        let all_same_object = interaction
-            .map(|i| {
-                i.get_render_object_id()
-                    .id()
-                    .simd_horizontal_min()
-                    .abs_diff_eq_default(&i.get_render_object_id().id().simd_horizontal_max())
-            })
-            .unwrap_or(false);
+        // let all_same_object = interaction
+        //     .map(|i| {
+        //         i.get_render_object_id()
+        //             .id()
+        //             .simd_horizontal_min()
+        //             .abs_diff_eq_default(&i.get_render_object_id().id().simd_horizontal_max())
+        //     })
+        //     .unwrap_or(false);
 
-        if all_same_object && V::LANES > 2 {
-            rest_coordinates = &rest_coordinates[..(rest_coordinates.len() / 2)];
-            scale =
-                V::Scalar::from_subset(&(1.0 / ((1 + rest_coordinates.len()) * V::LANES) as f32))
-        }
+        // if all_same_object && V::LANES > 2 {
+        //     rest_coordinates = &rest_coordinates[..(rest_coordinates.len() / 2)];
+        //     scale =
+        //         V::Scalar::from_subset(&(1.0 / ((1 + rest_coordinates.len()) * V::LANES) as f32))
+        // }
 
         let initial_color = initial_color * scale;
-
-        let scale_factor = ((5.0f32).sqrt() / 2.0);
-
-        let unit_x = V::unit_x();
-        let unit_y = V::unit_y();
 
         // fixme: maybe reordering the rays here so that 1 simd ray represents the different samples of the antialiasing for the same "real" pixel, because they cohere better, instead of the rays of independent "real" pixels.
         // Sample multiple rays and average the results
@@ -1109,6 +921,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             >,
         Standard: Distribution<<Vec3 as Vector>::Scalar>,
         [(); { Self::get_total_rays::<V>() }]:,
+        [(); Self::get_total_rays::<V>() - 1]:,
         [(); { <<V as Vector>::Scalar as SimdValue>::LANES }]:,
         [(); <V as Vector>::DIMENSIONS]:,
     {
@@ -1125,51 +938,72 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             direction_bias.1,
             direction_bias.2,
             direction_bias.3,
+            direction_bias.4,
+            direction_bias.5,
+            direction_bias.6,
+            direction_bias.7,
         ];
 
-        let scale_factor = ((5.0f32).sqrt() / 2.0);
+        let scale_factor = if cfg!(feature = "anti_aliasing_rotation_scale") {
+            ((5.0f32).sqrt() / 2.05)
+        } else {
+            0.85
+        };
 
         let bundle_iter = (0..total_rays)
             .collect_array::<{ Self::get_total_rays::<V>() }>()
             .expect("Has enough rays");
         let bundle_iter = bundle_iter.chunks_exact(<V as Vector>::LANES);
 
-        let random_iter = [[0.0; 2]]
-            .into_iter()
-            .chain(
-                Poisson2D::new()
-                    .with_dimensions([1.2, 1.2], (3.0 / total_rays as f32))
-                    .with_samples(total_rays as u32)
-                    .into_iter()
-                    .take(total_rays - 1), // only return TOTAL_RAYS -1 because we defined the 1st point in the iterator to be 0 to sample at the exact position of the ray
-            )
-            .pad_using(total_rays, |_| -> fast_poisson::Point<2> {
-                let random_vec = Vec3::sample_random() * 1.15;
-                [random_vec.x, random_vec.y]
-            })
-            .map(|p| -> fast_poisson::Point<2> {
-                [
-                    p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
-                    p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
-                ]
-            })
-            .collect::<Vec<_>>();
+        let random_iter = if cfg!(feature = "anti_aliasing_randomness") {
+            [[0.0; 2]]
+                .into_iter()
+                .chain(
+                    Poisson2D::new()
+                        .with_dimensions([1.2, 1.2], (3.0 / total_rays as f32))
+                        .with_samples(total_rays as u32)
+                        .into_iter()
+                        .take(total_rays - 1), // only return TOTAL_RAYS -1 because we defined the 1st point in the iterator to be 0 to sample at the exact position of the ray
+                )
+                .pad_using(total_rays, |_| -> fast_poisson::Point<2> {
+                    let random_vec = Vec3::sample_random() * 1.15;
+                    [random_vec.x, random_vec.y]
+                })
+                .map(|p| -> fast_poisson::Point<2> {
+                    [
+                        p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
+                        p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
+                    ]
+                })
+                .collect::<Vec<_>>()
+        } else {
+            [[0.0; 2]]
+                .into_iter()
+                .chain([[1.0; 2]; Self::get_total_rays::<V>() - 1])
+                .map(|p| -> fast_poisson::Point<2> {
+                    [
+                        p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
+                        p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
+                    ]
+                })
+                .collect::<Vec<_>>()
+        };
 
         let random_iter = random_iter.chunks(<V as Vector>::LANES);
 
         izip!(bundle_iter, random_iter)
             .map(|(is, random_vec)| {
                 //    println!("{random_vec:?}");
-                let (xs, ys, zs): (Vec<_>, Vec<_>, Vec<_>) = izip!(is, random_vec)
-                    .map(|(i, random_vec)| {
-                        let sampling_direction_bias = directions[i % directions.len()];
-                        (
-                            coords.x + random_vec[0] * sampling_direction_bias.x,
-                            coords.y + random_vec[1] * sampling_direction_bias.y,
-                            coords.z,
-                        )
-                    })
-                    .collect();
+                let (xs, ys, zs): (Vec<_>, Vec<_>, Vec<_>) =
+                    izip!(is, random_vec, directions.iter().cycle())
+                        .map(|(i, random_vec, sampling_direction_bias)| {
+                            (
+                                coords.x + random_vec[0] * sampling_direction_bias.x,
+                                coords.y + random_vec[1] * sampling_direction_bias.y,
+                                coords.z,
+                            )
+                        })
+                        .collect();
 
                 <V as VectorFixedDimensions<3>>::from_scalar_components([
                     xs.into_iter()
@@ -1192,6 +1026,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     ) -> Option<Pixel>
     where
         [(); { Self::get_total_rays::<Vec3>() }]:,
+        [(); { Self::get_total_rays::<Vec3>() - 1 }]:,
     {
         let coords = Vec3::new(x as f32, y as f32, 0.0);
         let render_ray_direction = coords - RENDER_RAY_FOCUS;
@@ -1205,7 +1040,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 render_ray_direction,
                 start_refraction_index,
                 &scene.scene_objects,
-                LIGHTS.iter(),
+                (scene
+                    .scene_lights
+                    .iter()
+                    .flat_map(|light| light.preprocess::<{ POINT_LIGHT_MULTIPLICATOR }>())
+                    .collect::<Vec<_>>()),
             )?
         } else {
             let (color, mask, _) = Self::single_raytrace::<false, false, false, _>(
@@ -1213,7 +1052,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 render_ray_direction,
                 start_refraction_index,
                 &scene.scene_objects,
-                LIGHTS.iter(),
+                scene
+                    .scene_lights
+                    .iter()
+                    .flat_map(|light| light.preprocess::<{ POINT_LIGHT_MULTIPLICATOR }>())
+                    .collect::<Vec<_>>(),
                 None,
             )?;
 
@@ -1233,6 +1076,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         set_pixel: &dyn Fn(usize, Pixel),
     ) where
         [(); { Self::get_total_rays::<Vec3x8>() }]:,
+        [(); { Self::get_total_rays::<Vec3x8>() - 1 }]:,
     {
         let start_refraction_index = DEFAULT_REFRACTION_INDEX; // air
         if cfg!(feature = "anti_aliasing") {
@@ -1244,12 +1088,16 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
                 // println!("{bundle_rays_coords:?}");
 
-                if let Some((color, valid)) = Self::antialiased_raytrace(
+                if let Some((color, true)) = Self::antialiased_raytrace(
                     bundle_rays_coords,
                     render_ray_direction,
                     WideF32x8::from_subset(&start_refraction_index),
                     &scene.scene_objects,
-                    LIGHTS.iter(),
+                    scene
+                        .scene_lights
+                        .iter()
+                        .flat_map(|light| light.preprocess::<{ POINT_LIGHT_MULTIPLICATOR }>())
+                        .collect::<Vec<_>>(),
                 ) {
                     set_pixel(i, Pixel(color));
                 }
@@ -1306,7 +1154,13 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                             render_ray_direction,
                             WideF32x8::from_subset(&start_refraction_index),
                             &scene.scene_objects,
-                            LIGHTS.iter(),
+                            scene
+                                .scene_lights
+                                .iter()
+                                .flat_map(|light| {
+                                    light.preprocess::<{ POINT_LIGHT_MULTIPLICATOR }>()
+                                })
+                                .collect::<Vec<_>>(),
                             None,
                         )
                     else {
@@ -1333,7 +1187,13 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                             render_ray_direction,
                             WideF32x4::from_subset(&start_refraction_index),
                             &scene.scene_objects,
-                            LIGHTS.iter(),
+                            scene
+                                .scene_lights
+                                .iter()
+                                .flat_map(|light| {
+                                    light.preprocess::<{ POINT_LIGHT_MULTIPLICATOR }>()
+                                })
+                                .collect::<Vec<_>>(),
                             None,
                         )
                     else {
@@ -1361,7 +1221,13 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                                 render_ray_direction,
                                 start_refraction_index,
                                 &scene.scene_objects,
-                                LIGHTS.iter(),
+                                scene
+                                    .scene_lights
+                                    .iter()
+                                    .flat_map(|light| {
+                                        light.preprocess::<{ POINT_LIGHT_MULTIPLICATOR }>()
+                                    })
+                                    .collect::<Vec<_>>(),
                                 None,
                             )
                         {
@@ -1379,7 +1245,9 @@ impl<const W: usize, const H: usize, C: OutputColorEncoder> Renderer<W, H, C>
 where
     [(); W * H]:,
     [(); { Self::get_total_rays::<Vec3x8>() }]:,
+    [(); { Self::get_total_rays::<Vec3x8>() - 1 }]:,
     [(); { Self::get_total_rays::<Vec3>() }]:,
+    [(); { Self::get_total_rays::<Vec3>() - 1 }]:,
 {
     fn render(&self, buffer: &ImageBuffer<W, H>, scene: &Scene<Vec3>)
     where

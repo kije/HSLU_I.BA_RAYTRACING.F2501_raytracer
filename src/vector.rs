@@ -1,19 +1,22 @@
+use crate::AVERAGE_SCENE_DIMENSION;
 use crate::helpers::Splatable;
 use crate::matrix::Matrix;
 use crate::scalar::Scalar;
 use crate::simd_compat::SimdValueSimplified;
 use simba::scalar::SupersetOf;
+use simba::simd::SimdComplexField;
+use simba::simd::SimdPartialOrd;
 use simba::simd::{SimdValue, WideF32x4, WideF32x8};
 use std::fmt::Debug;
 use tt_call::tt_if;
 use tt_equal::tt_equal;
 use ultraviolet::{
-    Bivec2, Bivec2x4, Bivec2x8, Bivec3, Bivec3x4, Bivec3x8, IVec2, IVec3, IVec4, Mat2, Mat2x4,
-    Mat2x8, Mat3, Mat3x4, Mat3x8, Rotor2, Rotor2x4, Rotor2x8, Rotor3, Rotor3x4, Rotor3x8, UVec2,
-    UVec3, UVec4, Vec2, Vec2x4, Vec2x8, Vec3, Vec3x4, Vec3x8, Vec4, Vec4x4, Vec4x8, m32x4, m32x8,
+    Bivec2, Bivec2x4, Bivec2x8, Bivec3, Bivec3x4, Bivec3x8, IVec2, IVec3, IVec4, Lerp, Mat2,
+    Mat2x4, Mat2x8, Mat3, Mat3x4, Mat3x8, Rotor2, Rotor2x4, Rotor2x8, Rotor3, Rotor3x4, Rotor3x8,
+    UVec2, UVec3, UVec4, Vec2, Vec2x4, Vec2x8, Vec3, Vec3x4, Vec3x8, Vec4, Vec4x4, Vec4x8, m32x4,
+    m32x8,
 };
 use wide::{f32x4, f32x8};
-
 /// The basic scalar type
 ///
 /// This does not make any assumption on the algebraic properties of `Self`.
@@ -77,6 +80,10 @@ pub trait VectorOperations: Vector {
         rand::distributions::Standard: rand::distributions::Distribution<Self::Scalar>;
 }
 
+pub trait VectorLerp: Vector + Lerp<Self::InnerScalar> {
+    fn lerp(&self, end: Self, t: Self::Scalar) -> Self;
+}
+
 pub trait Vector3DOperations: VectorAssociations {
     fn cross(&self, other: Self) -> Self;
     fn wedge(&self, other: Self) -> Self::Bivec;
@@ -127,6 +134,9 @@ pub trait ReflectableVector: Vector {
 pub trait RefractableVector: Vector {
     fn refract(&mut self, normal: Self, eta: Self::Scalar);
     fn refracted(&self, normal: Self, eta: Self::Scalar) -> Self;
+
+    // For refraction direction:
+    fn refracted_with_tir(&self, normal: Self, eta: Self::Scalar) -> Self;
 }
 
 pub trait SimdCapableVector:
@@ -302,6 +312,14 @@ macro_rules! impl_vector {
             }
         }
     };
+    (LERP ;; $vec:ident( $scalar_type:ty = $inner_scalar:ty | $lanes: literal ) ;; ($($component:ident),+)) => {
+
+         impl crate::vector::VectorLerp for $vec {
+            fn lerp(&self, end: Self, t: Self::Scalar) -> Self {
+                <$vec as Lerp<$inner_scalar>>::lerp(self, end, impl_vector!(@cast_simd_value $scalar_type, $inner_scalar, t))
+            }
+        }
+    };
     (REFRACTABLE ;; $vec:ident( $scalar_type:ty = $inner_scalar:ty | $lanes: literal ) ;; ($($component:ident),+)) => {
          impl crate::vector::RefractableVector for $vec {
              #[inline(always)]
@@ -321,6 +339,24 @@ macro_rules! impl_vector {
                  }
                  refracted_inner(self, normal, eta)
              }
+
+             #[inline(always)]
+             fn refracted_with_tir(&self, normal: Self, eta: Self::Scalar) -> Self {
+                 let one = <$scalar_type as num_traits::One>::one();
+                let cos_i = -self.dot(normal);
+                 let cos_i = impl_vector!(@cast_simd_value $inner_scalar, $scalar_type, cos_i);
+                let sin2_t = eta * eta * (one - cos_i * cos_i);
+
+                  // Total internal reflection
+                 let is_tir = sin2_t.simd_ge(one);
+
+                let cos_t = (one - sin2_t).simd_sqrt();
+                 let eta = impl_vector!(@cast_simd_value $scalar_type, $inner_scalar, eta);
+                 let cos_i = impl_vector!(@cast_simd_value $scalar_type, $inner_scalar, cos_i);
+                 let cos_t = impl_vector!(@cast_simd_value $scalar_type, $inner_scalar, cos_t);
+
+                <$vec as SimdCapableVector>::blend(is_tir, self.reflected(normal), $vec::broadcast(eta) * (*self) + $vec::broadcast((eta * cos_i - cos_t)) * normal)
+            }
         }
     };
     (FLOAT ;; $vec:ident( $scalar_type:ty = $inner_scalar:ty | $lanes: literal ) ;; ($($component:ident),+)) => {
@@ -545,9 +581,8 @@ macro_rules! impl_vector {
                 }
             }
         }
-        impl crate::vector::VectorFixedLanes<$lanes> for $vec {
 
-        }
+        impl crate::vector::VectorFixedLanes<$lanes> for $vec {}
 
         $(
             tt_if!{
@@ -661,7 +696,7 @@ macro_rules! impl_vector {
                 #[inline(always)]
                     fn default_epsilon_distance() -> Self {
                         use crate::float_ext::AbsDiffEq;
-                        $vec::default_epsilon() * $vec::from_element(10.0)
+                        $vec::default_epsilon() * $vec::from_element(100.0 * AVERAGE_SCENE_DIMENSION)
                     }
                 }
             );
@@ -671,19 +706,19 @@ macro_rules! impl_vector {
 
 impl_vector!(
     [
-        Vec2 (f32 = f32 | 1) => Rotor2|Bivec2|Mat2 {(FLOAT), (REFLECTABLE),(REFRACTABLE), (MANUAL_SIMD_OPS[Vec2, bool])}, IVec2 ( i32 = i32 | 1), UVec2 ( u32 = u32 | 1),
-        Vec2x4 (WideF32x4 = f32x4 | 4) => Rotor2x4|Bivec2x4|Mat2x4 {(FLOAT), (REFLECTABLE),(REFRACTABLE), (SIMD_OPS[Vec2, m32x4])},
-        Vec2x8 (WideF32x8 = f32x8 | 8) => Rotor2x8|Bivec2x8|Mat2x8 {(FLOAT), (REFLECTABLE),(REFRACTABLE), (SIMD_OPS[Vec2, m32x8])}
+        Vec2 (f32 = f32 | 1) => Rotor2|Bivec2|Mat2 {(FLOAT), (REFLECTABLE),(REFRACTABLE),(LERP), (MANUAL_SIMD_OPS[Vec2, bool])}, IVec2 ( i32 = i32 | 1), UVec2 ( u32 = u32 | 1),
+        Vec2x4 (WideF32x4 = f32x4 | 4) => Rotor2x4|Bivec2x4|Mat2x4 {(FLOAT), (REFLECTABLE),(REFRACTABLE),(LERP), (SIMD_OPS[Vec2, m32x4])},
+        Vec2x8 (WideF32x8 = f32x8 | 8) => Rotor2x8|Bivec2x8|Mat2x8 {(FLOAT), (REFLECTABLE),(REFRACTABLE),(LERP), (SIMD_OPS[Vec2, m32x8])}
     ] => [2 := (x,y)],
     [
-        Vec3 (f32 = f32 | 1) => Rotor3|Bivec3|Mat3 {(REFLECTABLE), (REFRACTABLE), (FLOAT), (MANUAL_SIMD_OPS[Vec3, bool])}, IVec3 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec3 ( u32 = u32 | 1),
-        Vec3x4 (WideF32x4 = f32x4 | 4) => Rotor3x4|Bivec3x4|Mat3x4 {(REFLECTABLE),(REFRACTABLE), (FLOAT), (SIMD_OPS[Vec3, m32x4])},
-        Vec3x8 (WideF32x8 = f32x8 | 8) => Rotor3x8|Bivec3x8|Mat3x8 {(REFLECTABLE),(REFRACTABLE), (FLOAT), (SIMD_OPS[Vec3, m32x8])}
+        Vec3 (f32 = f32 | 1) => Rotor3|Bivec3|Mat3 {(REFLECTABLE), (REFRACTABLE), (FLOAT),(LERP), (MANUAL_SIMD_OPS[Vec3, bool])}, IVec3 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec3 ( u32 = u32 | 1),
+        Vec3x4 (WideF32x4 = f32x4 | 4) => Rotor3x4|Bivec3x4|Mat3x4 {(REFLECTABLE),(REFRACTABLE),(LERP), (FLOAT), (SIMD_OPS[Vec3, m32x4])},
+        Vec3x8 (WideF32x8 = f32x8 | 8) => Rotor3x8|Bivec3x8|Mat3x8 {(REFLECTABLE),(REFRACTABLE),(LERP), (FLOAT), (SIMD_OPS[Vec3, m32x8])}
     ] => [3 := (x,y,z)],
     [
-        Vec4 (f32 = f32 | 1) {(REFLECTABLE), (FLOAT), (MANUAL_SIMD_OPS[Vec4, bool])}, IVec4 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec4 ( u32 = u32 | 1),
-        Vec4x4 (WideF32x4 = f32x4 | 4) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x4])},
-        Vec4x8 (WideF32x8 = f32x8 | 8) {(REFLECTABLE), (FLOAT), (SIMD_OPS[Vec4, m32x8])}
+        Vec4 (f32 = f32 | 1) {(REFLECTABLE), (FLOAT),(LERP), (MANUAL_SIMD_OPS[Vec4, bool])}, IVec4 ( i32 = i32 | 1) {(REFLECTABLE)}, UVec4 ( u32 = u32 | 1),
+        Vec4x4 (WideF32x4 = f32x4 | 4) {(REFLECTABLE), (FLOAT),(LERP), (SIMD_OPS[Vec4, m32x4])},
+        Vec4x8 (WideF32x8 = f32x8 | 8) {(REFLECTABLE), (FLOAT),(LERP), (SIMD_OPS[Vec4, m32x8])}
     ] => [4 := (x,y,z,w)]
 );
 

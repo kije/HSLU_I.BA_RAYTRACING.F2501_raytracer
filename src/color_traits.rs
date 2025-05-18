@@ -2,7 +2,7 @@ use crate::simd_compat::SimdValueRealSimplified;
 use palette::blend::Premultiply;
 use palette::cast::ArrayCast;
 use palette::stimulus::StimulusColor;
-use std::ops::Mul;
+use std::ops::{Add, Mul, Sub};
 
 /// A consolidated trait for color types compatible with lighting calculations
 ///
@@ -12,6 +12,8 @@ pub trait LightCompatibleColor<S: SimdValueRealSimplified>:
     Premultiply<Scalar = S>
     + Mul<S, Output = Self>
     + Mul<Self, Output = Self>
+    + Add<Self, Output = Self>
+    + Sub<Self, Output = Self>
     + StimulusColor
     + ArrayCast<Array = [S; 3]>
     + Clone
@@ -25,6 +27,8 @@ where
     C: Premultiply<Scalar = S>
         + Mul<S, Output = Self>
         + Mul<Self, Output = Self>
+        + Add<Self, Output = Self>
+        + Sub<Self, Output = Self>
         + StimulusColor
         + ArrayCast<Array = [S; 3]>
         + Clone,

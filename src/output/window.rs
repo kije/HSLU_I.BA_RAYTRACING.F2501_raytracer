@@ -1,7 +1,10 @@
 use crate::helpers::{Pixel, RenderTiming};
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputColorEncoder, OutputInteractive};
-use minifb::{Key, Result as WindowResult, Scale, ScaleMode, Window, WindowOptions};
+use minifb::{
+    CursorStyle, HasWindowHandle, Key, Result as WindowResult, Scale, ScaleMode, Window,
+    WindowOptions,
+};
 use std::thread;
 
 #[derive(Debug)]
@@ -29,15 +32,15 @@ pub struct WindowOutput<const W: usize, const H: usize> {
 
 impl<const W: usize, const H: usize> WindowOutput<W, H> {
     pub fn new() -> WindowResult<Self> {
-        Ok(Self {
+        let mut window = Self {
             inner: WindowOutputInner::<W, H> {
                 window: Window::new(
-                    "Minimal Raytracer - Rust",
+                    "Raytracer - Rust",
                     W,
                     H,
                     WindowOptions {
-                        title: false,
-                        resize: false,
+                        title: true,
+                        resize: true,
                         borderless: true,
                         scale: Scale::FitScreen,
                         scale_mode: ScaleMode::AspectRatioStretch,
@@ -46,7 +49,42 @@ impl<const W: usize, const H: usize> WindowOutput<W, H> {
                     },
                 )?,
             },
-        })
+        };
+
+        window.inner.window.set_background_color(0, 0, 0);
+        window.inner.window.set_cursor_style(CursorStyle::Crosshair);
+        window.inner.window.set_title(
+            format!(
+                "Raytracer - {} | {}",
+                if cfg!(feature = "simd_render") {
+                    "SIMD"
+                } else {
+                    "Non-SIMD"
+                },
+                if cfg!(feature = "anti_aliasing") {
+                    format!(
+                        "Antialiasing {} {}",
+                        if cfg!(feature = "anti_aliasing_rotation_scale") {
+                            "ROS_SCL"
+                        } else {
+                            ""
+                        },
+                        if cfg!(feature = "anti_aliasing_randomness") {
+                            "RNG"
+                        } else {
+                            ""
+                        }
+                    )
+                    .trim()
+                    .to_string()
+                } else {
+                    "Non-Antialiasing".to_string()
+                }
+            )
+            .trim(),
+        );
+
+        Ok(window)
     }
 }
 

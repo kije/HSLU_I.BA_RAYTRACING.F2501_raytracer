@@ -1,5 +1,7 @@
 use crate::helpers::{ColorType, Splatable};
 use crate::simd_compat::SimdValueRealSimplified;
+use crate::vector::{Vector, Vector3DAccessor, VectorFixedDimensions};
+use palette::num::{One, Zero};
 use palette::{Hsv, IntoColor, Srgb};
 use simba::scalar::SubsetOf;
 use simba::simd::SimdValue;
@@ -14,6 +16,18 @@ where
     fn splat(v: &ColorType<Scalar::Element>) -> Self
     where
         Self: Splatable<ColorType<Scalar::Element>>;
+
+    fn zero() -> Self
+    where
+        Scalar: Zero;
+    fn one() -> Self
+    where
+        Scalar: One;
+
+    fn to_vec3<V: Vector<Scalar = Scalar> + VectorFixedDimensions<3>>(&self) -> V;
+    fn from_vec3<V: Vector<Scalar = Scalar> + VectorFixedDimensions<3> + Vector3DAccessor>(
+        vec: &V,
+    ) -> Self;
 }
 
 impl<SourceScalar, Scalar: Splatable<SourceScalar>> Splatable<ColorType<SourceScalar>>
@@ -53,6 +67,29 @@ where
         Self: Splatable<ColorType<Scalar::Element>>,
     {
         <Self as Splatable<_>>::splat(v)
+    }
+
+    fn zero() -> Self
+    where
+        Scalar: Zero,
+    {
+        Self::new(Scalar::zero(), Scalar::zero(), Scalar::zero())
+    }
+    fn one() -> Self
+    where
+        Scalar: One,
+    {
+        Self::new(Scalar::one(), Scalar::one(), Scalar::one())
+    }
+
+    fn to_vec3<V: Vector<Scalar = Scalar> + VectorFixedDimensions<3>>(&self) -> V {
+        V::from_components([self.red.clone(), self.green.clone(), self.blue.clone()])
+    }
+
+    fn from_vec3<V: Vector<Scalar = Scalar> + VectorFixedDimensions<3> + Vector3DAccessor>(
+        vec: &V,
+    ) -> Self {
+        ColorType::<Scalar>::new(vec.x().clone(), vec.y().clone(), vec.z().clone())
     }
 }
 

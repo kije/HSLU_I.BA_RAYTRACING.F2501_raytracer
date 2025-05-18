@@ -11,6 +11,14 @@ path = "src/lib.rs"
 name = "raytracer"
 path = "src/main.rs"
 
+[[example]]
+name = "test_scene"
+path = "examples/test_scene.rs"
+
+[[example]]
+name = "test_text"
+path = "examples/test_text.rs"
+
 [dependencies]
 minifb = "0.28"
 rayon = "1.10"
@@ -24,9 +32,9 @@ wide = "0.7"
 simba = { version = "0.9", git = "https://github.com/kije/simba.git", features = ["wide", "partial_fixed_point_support", "rand"] }
 num-traits = "0.2"
 approx = "0.5.1"
-#pastey = "0.1.0"
+# pastey = "0.1.0"
 itertools = "0.14"
-by_address = "1.2.1"
+# by_address = "1.2.1"
 tt-call = "1.0"
 tt-equal = "0.1.2"
 
@@ -37,8 +45,11 @@ rand = { version = "0.8", features = ["min_const_gen", "nightly", "small_rng"] }
 #o2o = "0.5.3"
 #michie = "3.0.2"
 enumcapsulate = "0.6.2"
-wavefront_obj = { version = "11.0.0" }
-nobject-rs = "3.0.1"
+
+# wavefront_obj = { version = "11.0.0" }
+
+tobj = { version = "4.0.3", features = ["reordering", "merging"] }
+
 fast_poisson = { version = "1.0.2", features = ["single_precision"] }
 
 [dev-dependencies]
@@ -46,19 +57,22 @@ assert_float_eq = "1.1"
 
 [features]
 # default = ["high_quality", "realistic", "anti_aliasing", "medium_resolution"]
-default = ["realistic", "medium_resolution"]
+default = ["realistic", "anti_aliasing", "high_quality", "high_resolution"]
 simd_render = []
 simulate_slow_render = []
 render_timing_debug = ["incr_stats"]
 anti_aliasing = []
+anti_aliasing_rotation_scale = ["anti_aliasing"]
+anti_aliasing_randomness = ["anti_aliasing"]
 high_resolution = []
 medium_resolution = []
 soft_shadows = []
 reflections = []
 light_reflections = []
 refractions = []
-realistic = ["reflections", "light_reflections", "soft_shadows", "refractions"]
-high_quality = ["anti_aliasing"]
+realistic = ["reflections", "light_reflections", "refractions"]
+high_quality_model = []
+high_quality = ["anti_aliasing", "soft_shadows", "high_quality_model"]
 extreme_quality = ["high_quality"]
 
 [patch.crates-io]

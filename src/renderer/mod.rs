@@ -22,7 +22,7 @@ mod raytracer_renderer;
 use crate::output::OutputColorEncoder;
 use crate::scene::Scene;
 use crate::{WINDOW_TO_SCENE_HEIGHT_FACTOR, WINDOW_TO_SCENE_WIDTH_FACTOR};
-pub use raytracer_renderer::{RaytracerRenderer, SCENE};
+pub use raytracer_renderer::RaytracerRenderer;
 
 pub struct RenderCoordinates {
     x: f32,

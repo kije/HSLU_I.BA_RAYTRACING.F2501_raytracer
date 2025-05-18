@@ -17,6 +17,7 @@ use simba::scalar::SupersetOf;
 use simba::simd::SimdComplexField;
 use simba::simd::SimdRealField;
 use simba::simd::{SimdPartialOrd, SimdValue};
+use std::borrow::Cow;
 use ultraviolet::Vec3;
 
 #[derive(Debug, Copy, Clone)]
@@ -188,7 +189,7 @@ where
             return [self.clone(); N];
         }
 
-        let cloud_radius = (1.375 + (N as f32 / 56.0));
+        let cloud_radius = (1.625 + (N as f32 / 20.0));
 
         let scale = V::Scalar::from_subset(&(1.0 / N as f32));
         let cloud_radius_v = V::broadcast(V::Scalar::from_subset(&cloud_radius));
@@ -201,7 +202,7 @@ where
             ),
         );
         let random_points = Poisson3D::new()
-            .with_dimensions([cloud_radius, cloud_radius, cloud_radius], (1.0 / N as f32))
+            .with_dimensions([cloud_radius, cloud_radius, cloud_radius], (2.5 / N as f32))
             .with_samples(N as u32);
 
         (0..N)
@@ -281,7 +282,7 @@ where
 
         let attenuation = thousand * (epsilon + light_distance + light_distance * light_distance);
 
-        let att_sigmoid = attenuation.simd_tanh();
+        let att_sigmoid = (attenuation.simd_tanh() + one) / V::Scalar::from_subset(&2.0);
         // Calculate light intensity based on angle and distance
         let light_factor =
             incident_light_angle_cos * self.intensity * att_sigmoid.simd_clamp(zero, one);
@@ -290,7 +291,7 @@ where
             ColorType::blend(
                 incident_angle_pos,
                 &(material * self.color),
-                &ColorType::new(zero, zero, zero),
+                &ColorType::zero(),
             ),
             light_factor.select(incident_angle_pos, zero),
             incident_angle_pos,
@@ -298,12 +299,29 @@ where
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub enum SceneLightSource<V>
 where
-    V: SimdRenderingVector,
-    ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
+    V: RenderingVector,
 {
     PointLight(PointLight<V>),
+}
+
+impl<V: RenderingVector + 'static> SceneLightSource<V> {
+    pub fn preprocess<const POINT_LIGHT_MULTIPLICATOR: usize>(
+        &self,
+    ) -> impl IntoIterator<Item = Cow<'static, Self>> + Clone + Sync
+    where
+        V: SimdCapableVector<SingleValueVector = Vec3>,
+        Standard: Distribution<<V as Vector>::Scalar>,
+    {
+        match self {
+            SceneLightSource::PointLight(light) => light
+                .to_point_light_cloud::<POINT_LIGHT_MULTIPLICATOR>()
+                .map(SceneLightSource::PointLight)
+                .map(Cow::Owned),
+        }
+    }
 }
 
 impl<V> Light<V> for SceneLightSource<V>
@@ -320,6 +338,26 @@ where
         match self {
             SceneLightSource::PointLight(light) => {
                 light.calculate_contribution_at(lightable, position, ray_from_direction)
+            }
+        }
+    }
+}
+
+impl<V: RenderingVector> From<PointLight<V>> for SceneLightSource<V> {
+    fn from(value: PointLight<V>) -> Self {
+        SceneLightSource::PointLight(value)
+    }
+}
+
+impl<V> Splatable<SceneLightSource<<V as SimdCapableVector>::SingleValueVector>>
+    for SceneLightSource<V>
+where
+    V: SimdRenderingVector,
+{
+    fn splat(v: &SceneLightSource<<V as SimdCapableVector>::SingleValueVector>) -> Self {
+        match v {
+            SceneLightSource::PointLight(light) => {
+                SceneLightSource::PointLight(PointLight::splat(&light))
             }
         }
     }

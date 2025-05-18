@@ -31,17 +31,17 @@ pub const CONFIGURED_WINDOW_WIDTH: usize = if cfg!(feature = "high_resolution") 
     1620
 } else {
     if cfg!(feature = "medium_resolution") {
-        1100
+        1140
     } else {
         768
     }
 };
 
 pub const CONFIGURED_WINDOW_HEIGHT: usize = if cfg!(feature = "high_resolution") {
-    1280
+    1350
 } else {
     if cfg!(feature = "medium_resolution") {
-        830
+        950
     } else {
         640
     }
@@ -74,8 +74,9 @@ pub const WINDOW_ASPECT_RATIO: f32 = (WINDOW_HEIGHT as f32) / WINDOW_WIDTH as f3
 pub const WINDOW_SCENE_DEPTH: usize = (WINDOW_WIDTH + WINDOW_HEIGHT) / 2;
 
 pub const SCENE_WIDTH: f32 = 1.0;
-pub const SCENE_HEIGHT: f32 = 1.0 * WINDOW_ASPECT_RATIO; // Fixme somehow this should also be 1.0 -> e.g. coordinates should be between 0 and 1. Idea: have a pixel size ratio. Coordinates in the scene are 0..1, but then are scaled to pixel-size, where the "pixel" can rectangular instead of quadratic
-pub const SCENE_DEPTH: f32 = 1.0;
+pub const SCENE_HEIGHT: f32 = SCENE_WIDTH * WINDOW_ASPECT_RATIO; // Fixme somehow this should also be 1.0 -> e.g. coordinates should be between 0 and 1. Idea: have a pixel size ratio. Coordinates in the scene are 0..1, but then are scaled to pixel-size, where the "pixel" can rectangular instead of quadratic
+pub const SCENE_DEPTH: f32 = (SCENE_WIDTH + SCENE_HEIGHT) / 2.0;
+pub const AVERAGE_SCENE_DIMENSION: f32 = (SCENE_WIDTH + SCENE_HEIGHT + SCENE_DEPTH) / 3.0;
 
 pub const WINDOW_TO_SCENE_WIDTH_FACTOR: f32 = SCENE_WIDTH / WINDOW_WIDTH as f32;
 pub const WINDOW_TO_SCENE_HEIGHT_FACTOR: f32 = SCENE_HEIGHT / WINDOW_HEIGHT as f32;
@@ -85,7 +86,7 @@ pub const AVERAGE_SCENE_FACTOR: f32 =
     (WINDOW_TO_SCENE_WIDTH_FACTOR + WINDOW_TO_SCENE_HEIGHT_FACTOR + WINDOW_TO_SCENE_DEPTH_FACTOR)
         / 3.0;
 pub static RENDER_RAY_FOCUS: Vec3 =
-    Vec3::new(SCENE_WIDTH / 2.0, SCENE_HEIGHT / 2.0, -2.0 * SCENE_DEPTH);
+    Vec3::new(SCENE_WIDTH / 2.0, SCENE_HEIGHT / 2.0, -1.9 * SCENE_DEPTH);
 
 // IoR of air
 pub const DEFAULT_REFRACTION_INDEX: f32 = 1.000293;

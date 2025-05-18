@@ -4,11 +4,12 @@ use crate::simd_compat::SimdValueRealSimplified;
 use crate::vector::{
     NormalizableVector, ReflectableVector, RefractableVector, RotatableVector, SimdCapableVector,
     Vector, Vector3DAccessor, Vector3DOperations, VectorAssociations, VectorFixedDimensions,
-    VectorOperations,
+    VectorLerp, VectorOperations,
 };
 use simba::scalar::{SubsetOf, SupersetOf};
 use simba::simd::SimdValue;
 use std::ops::{Add, Div, Mul, Neg, Sub};
+use ultraviolet::Lerp;
 
 /// A basic vector trait combining common vector operations
 pub trait BaseVector:
@@ -16,6 +17,7 @@ pub trait BaseVector:
     + Add<Self, Output = Self>
     + Sub<Self, Output = Self>
     + Mul<Self, Output = Self>
+    + Div<Self, Output = Self>
     + Copy
     + VectorOperations
     + Sync
@@ -28,6 +30,7 @@ impl<V> BaseVector for V where
         + Add<Self, Output = Self>
         + Sub<Self, Output = Self>
         + Mul<Self, Output = Self>
+        + Div<Self, Output = Self>
         + Copy
         + VectorOperations
         + Sync
@@ -46,6 +49,7 @@ pub trait RenderingVector:
     + Neg<Output = Self>
     + Vector3DAccessor
     + VectorFixedDimensions<3>
+    + VectorLerp
     + VectorAssociations<Matrix: MatrixFixedDimensions<3> + MatrixOperations>
 {
 }
@@ -62,6 +66,7 @@ impl<V> RenderingVector for V where
         + Neg<Output = V>
         + Vector3DAccessor
         + VectorFixedDimensions<3>
+        + VectorLerp
         + VectorAssociations<Matrix: MatrixFixedDimensions<3> + MatrixOperations>
 {
 }

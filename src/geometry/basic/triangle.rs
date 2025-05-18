@@ -59,7 +59,7 @@ impl<V: RenderingVector> TriangleData<V> {
         vertex1: V,
         vertex2: V,
         vertex3: V,
-        material: Material<V::Scalar>,
+        material: Material<V::Scalar>, // fixme: allow material to either be owned or referenced (e.g. keep a list of materials in the scene and reference it here) -> possible issues with multi-threading & lifetimes? Might no bring too much anyways due to splatting and blending
     ) -> Self {
         // Calculate the face normal
         let edge1 = vertex2 - vertex1;
