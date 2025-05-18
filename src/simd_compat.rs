@@ -118,6 +118,7 @@ pub trait SimdValueRealSimplified:
     + palette::num::MulAdd
     + palette::num::Powf
     + palette::num::Round
+    + palette::num::IsValidDivisor
     + palette::angle::RealAngle
     + palette::angle::UnsignedAngle
 {
@@ -142,6 +143,7 @@ impl<V> SimdValueRealSimplified for V where
         + palette::num::MulAdd
         + palette::num::Powf
         + palette::num::Round
+        + palette::num::IsValidDivisor
         + palette::angle::RealAngle
         + palette::angle::UnsignedAngle
 {

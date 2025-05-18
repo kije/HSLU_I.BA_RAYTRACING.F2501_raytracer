@@ -17,6 +17,14 @@ where
     where
         Self: Splatable<ColorType<Scalar::Element>>;
 
+    fn abs_diff_eq_default_all(&self, v: &Self) -> Scalar::SimdBool
+    where
+        Scalar: crate::float_ext::AbsDiffEq<Scalar, Output = Scalar::SimdBool>;
+
+    fn abs_diff_eq_default_any(&self, v: &Self) -> Scalar::SimdBool
+    where
+        Scalar: crate::float_ext::AbsDiffEq<Scalar, Output = Scalar::SimdBool>;
+
     fn zero() -> Self
     where
         Scalar: Zero;
@@ -67,6 +75,26 @@ where
         Self: Splatable<ColorType<Scalar::Element>>,
     {
         <Self as Splatable<_>>::splat(v)
+    }
+
+    fn abs_diff_eq_default_all(&self, v: &Self) -> Scalar::SimdBool
+    where
+        Scalar: crate::float_ext::AbsDiffEq<Scalar, Output = Scalar::SimdBool>,
+    {
+        use crate::float_ext::AbsDiffEq;
+        self.blue.abs_diff_eq_default(&v.blue)
+            & self.green.abs_diff_eq_default(&v.green)
+            & self.red.abs_diff_eq_default(&v.red)
+    }
+
+    fn abs_diff_eq_default_any(&self, v: &Self) -> Scalar::SimdBool
+    where
+        Scalar: crate::float_ext::AbsDiffEq<Scalar, Output = Scalar::SimdBool>,
+    {
+        use crate::float_ext::AbsDiffEq;
+        self.blue.abs_diff_eq_default(&v.blue)
+            | self.green.abs_diff_eq_default(&v.green)
+            | self.red.abs_diff_eq_default(&v.red)
     }
 
     fn zero() -> Self

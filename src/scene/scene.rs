@@ -1,7 +1,7 @@
 use crate::geometry::{GeometryCollection, RenderGeometry};
 use crate::geometry::{SphereData, TriangleData};
 use crate::simd_compat::SimdValueRealSimplified;
-use crate::vector::Vector;
+use crate::vector::{Vector, VectorFixedLanes};
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
@@ -13,6 +13,7 @@ use crate::raytracing::{Material, TransmissionProperties};
 use crate::{RENDER_RAY_FOCUS, SCENE_DEPTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use itertools::Itertools;
 
+use crate::float_ext::AbsDiffEq;
 use crate::scene::lighting::SceneLightSource;
 use crate::vector_traits::RenderingVector;
 use std::path::Path;
@@ -130,6 +131,25 @@ impl<V: RenderingVector<Scalar: SimdValueRealSimplified>> Scene<V> {
         }
 
         Ok(s)
+    }
+
+    pub fn backface_culling(scene: Scene<Vec3>, view_direction: Vec3) -> Scene<Vec3> {
+        Scene {
+            scene_lights: scene.scene_lights.clone(),
+            scene_objects: scene
+                .scene_objects
+                .get_all()
+                .cloned()
+                .into_iter()
+                .filter(|object| match object {
+                    RenderGeometry::Sphere(_) => true,
+                    RenderGeometry::Triangle(triangle) => triangle
+                        .normal
+                        .dot(view_direction)
+                        .abs_diff_ne_default(&0.0),
+                })
+                .collect(),
+        }
     }
 
     pub fn with_capacities(scene_objects: usize, scene_lights: usize) -> Self {

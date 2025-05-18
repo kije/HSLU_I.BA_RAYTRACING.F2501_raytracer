@@ -189,7 +189,7 @@ where
             return [self.clone(); N];
         }
 
-        let cloud_radius = (1.625 + (N as f32 / 20.0));
+        let cloud_radius = (1.725 + (N as f32 / 20.0));
 
         let scale = V::Scalar::from_subset(&(1.0 / N as f32));
         let cloud_radius_v = V::broadcast(V::Scalar::from_subset(&cloud_radius));
@@ -202,7 +202,7 @@ where
             ),
         );
         let random_points = Poisson3D::new()
-            .with_dimensions([cloud_radius, cloud_radius, cloud_radius], (2.5 / N as f32))
+            .with_dimensions([cloud_radius, cloud_radius, cloud_radius], (4.0 / N as f32))
             .with_samples(N as u32);
 
         (0..N)

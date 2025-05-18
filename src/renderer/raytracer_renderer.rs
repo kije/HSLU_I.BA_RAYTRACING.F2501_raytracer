@@ -10,10 +10,12 @@ use crate::{
     WINDOW_WIDTH,
 };
 use itertools::{Itertools, izip};
+use rayon::ThreadPool;
 use rayon::iter::IndexedParallelIterator;
 use rayon::iter::ParallelIterator;
 use simba::simd::SimdRealField;
 use simba::simd::{SimdComplexField, SimdOption, WideF32x4, WideF32x8};
+use std::cell::LazyCell;
 
 // Import the consolidated traits
 use crate::color_traits::LightCompatibleColor;
@@ -46,7 +48,7 @@ use simba::simd::{SimdBool, SimdPartialOrd, SimdValue};
 use std::fmt::Debug;
 use std::hint::{likely, unlikely};
 use std::marker::PhantomData;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, RwLock};
 use ultraviolet::{Rotor3, Vec3, Vec3x4, Vec3x8, f32x8};
 use wide::f32x4;
 
@@ -94,6 +96,35 @@ const ANTIALIASING_SAMPLES_PER_PIXEL: usize = if cfg!(feature = "high_quality") 
     8
 };
 
+// Thread pool for ray processing
+static RAY_PROCESSING_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
+    rayon::ThreadPoolBuilder::default()
+        .num_threads(8) // Adjust based on available cores
+        .thread_name(|i| format!("ray-thread-{}", i))
+        .build()
+        .expect("Failed to build ray processing thread pool")
+});
+
+// Pre-calculated antialiasing samples for faster access
+static ANTIALIASING_SAMPLES: LazyLock<Vec<[f32; 2]>> = LazyLock::new(|| {
+    let total_rays = ANTIALIASING_SAMPLES_PER_PIXEL.next_multiple_of(8);
+    if cfg!(feature = "anti_aliasing_randomness") {
+        let mut samples = vec![[0.0, 0.0]];
+        samples.extend(
+            Poisson2D::new()
+                .with_dimensions([1.2, 1.2], (3.0 / total_rays as f32))
+                .with_samples(total_rays as u32)
+                .into_iter()
+                .take(total_rays - 1),
+        );
+        samples
+    } else {
+        let mut samples = vec![[0.0, 0.0]];
+        samples.extend(vec![[1.0, 1.0]; total_rays - 1]);
+        samples
+    }
+});
+
 trait SceneLightIterator<'a, V: 'a + SimdRenderingVector>:
     IntoIterator<Item: AsRef<SceneLightSource<V::SingleValueVector>>> + Clone + Sync
 {
@@ -138,14 +169,17 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         ColorType<V::Scalar>: LightCompatibleColor<V::Scalar>,
         Standard: Distribution<<V as Vector>::Scalar>,
     {
+        // Early recursion depth check
         if let Some(recursion_depth) = recursion_depth {
             if recursion_depth == 0 {
                 return None;
             }
         }
+
         let zero = V::Scalar::zero();
         let zero_color = ColorSimdExt::zero();
 
+        // Cast the ray and get the closest intersection
         let (ray, nearest_interaction) = Raytracer::cast_ray::<IS_ANTIALIASING_RAY, _>(
             coords,
             direction,
@@ -157,6 +191,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             return None;
         }
 
+        // Calculate direct lighting and specular highlights
         let (direct_light, specular_color): (ColorType<V::Scalar>, ColorType<V::Scalar>) =
             Self::calculate_lighting::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, _>(
                 &nearest_interaction,
@@ -166,13 +201,20 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 lights.clone(),
             );
 
+        // Apply distance-based attenuation
         let distance_factor =
             Self::attenuation_factor_based_on_distance::<V>(nearest_interaction.distance);
         let direct_light = direct_light * distance_factor;
         let specular_color = specular_color * distance_factor;
 
-        // fixme reflection and refractions can be calculated in parallel?
-        let reflection_color: ColorType<V::Scalar> = if cfg!(feature = "reflections") {
+        // Calculate reflection and refraction only when needed
+        let is_transmissive = nearest_interaction.material.transmission.mask();
+        let is_reflective = nearest_interaction.material.metallic.simd_gt(zero) | is_transmissive;
+
+        // Skip expensive calculations if material properties don't require them
+        let reflection_color: ColorType<V::Scalar> = if cfg!(feature = "reflections")
+            && is_reflective.any()
+        {
             Self::calculate_reflection::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, IS_REFRACTION_RAY, _>(
                 &nearest_interaction,
                 ray.direction,
@@ -185,44 +227,32 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             zero_color
         };
 
-        let refraction_color: ColorType<V::Scalar> = if cfg!(feature = "refractions") {
-            Self::calculate_refractions::<
-                IS_ANTIALIASING_RAY,
-                IS_REFLECTION_RAY,
-                IS_REFRACTION_RAY,
-                _,
-            >(
-                &nearest_interaction,
-                ray.direction,
-                start_refraction_index,
-                check_objects,
-                lights,
-                recursion_depth,
-            )
-        } else {
-            zero_color
-        };
+        let refraction_color: ColorType<V::Scalar> =
+            if cfg!(feature = "refractions") && is_transmissive.any() {
+                Self::calculate_refractions::<
+                    IS_ANTIALIASING_RAY,
+                    IS_REFLECTION_RAY,
+                    IS_REFRACTION_RAY,
+                    _,
+                >(
+                    &nearest_interaction,
+                    ray.direction,
+                    start_refraction_index,
+                    check_objects,
+                    lights,
+                    recursion_depth,
+                )
+            } else {
+                zero_color
+            };
 
-        // let color = ColorSimdExt::blend(
-        //     nearest_interaction.material.transmission.mask(),
-        //     &refraction_color,
-        //     &direct_light,
-        // );
-        //
-        // return Some((
-        //     color + reflection_color + refraction_color,
-        //     nearest_interaction.valid_mask,
-        //     nearest_interaction,
-        // ));
-
-        let is_transmissive = nearest_interaction.material.transmission.mask();
-
+        // Combine all lighting components
         let blend_color: ColorType<V::Scalar> = ColorSimdExt::blend(
             is_transmissive,
-            // For transparent materials, directly add reflection and refraction
+            // For transparent materials, combine reflection, refraction and specular
             &(reflection_color + refraction_color + specular_color),
-            // For opaque surfaces, direct lighting plus reflection
-            &(direct_light + reflection_color),
+            // For opaque surfaces, direct lighting plus reflection and specular
+            &(direct_light + reflection_color + specular_color),
         );
 
         Some((
@@ -238,13 +268,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let distance = distance.simd_abs();
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
-        let epsilon = V::Scalar::simd_default_epsilon();
-        let scale = V::Scalar::from_subset(&0.95);
-        let attenuation = scale * (epsilon + distance + distance * distance);
 
-        let att_sigmoid = (attenuation.simd_tanh() + one) / V::Scalar::from_subset(&2.0);
+        let scale = V::Scalar::from_subset(&0.1);
+        let attenuation = one / (one + distance + scale * distance * distance);
 
-        att_sigmoid.simd_clamp(zero, one)
+        attenuation.simd_clamp(zero, one)
     }
 
     fn calculate_refractions<
@@ -358,24 +386,67 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             start_refraction_index / new_medium_refraction_index,
         );
 
+        let (_, transmittance) =
+            interaction
+                .material
+                .compute_fresnel(inormal, view_dir, eta.simd_recip());
+
+        let has_transmittance = transmittance.abs_diff_eq_default_any(&ColorSimdExt::zero());
+
+        // if has_transmittance.none() {
+        //     return ColorSimdExt::zero();
+        // }
+
+        //
         // // Check for total internal reflection
         // let cos_theta_i = cos_theta.simd_abs();
         // let sin_theta_t_squared = eta * eta * (one - cos_theta_i * cos_theta_i);
         // let total_internal_reflection = sin_theta_t_squared.simd_ge(one);
+        //
+        // // Return early if we have total internal reflection everywhere
+        // if total_internal_reflection.all() {
+        //     return ColorSimdExt::zero();
+        // }
 
-        //let reflection_direction = view_dir.reflected(interaction.normal).normalized();
-        let refraction_direction = view_dir
-            //.refracted_with_tir(-inormal, eta.simd_recip())
-            .refracted(-inormal, eta.simd_recip())
-            .normalized();
+        let refraction_direction = view_dir.refracted(-inormal, eta.simd_recip()).normalized();
 
-        // let bsdf = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::one()
-        //     - interaction.material.bsdf(
-        //         inormal,
-        //         (-view_dir),
-        //         reflection_direction,
-        //         start_refraction_index,
-        //     );
+        // // Calculate the next recursion depth
+        // let next_depth = recursion_depth
+        //     .map(|d| d - 1)
+        //     .or(Some(RAYTRACE_REFRACTION_MAX_DEPTH));
+        //
+        // // Reusing thread pool instead of spawning new threads
+        // let refraction_color = if cfg!(feature = "refractions") && IS_REFRACTION_RAY {
+        //     Self::single_raytrace::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, true, _>(
+        //         interaction.point + (refraction_direction * V::default_epsilon_distance()),
+        //         refraction_direction,
+        //         new_medium_refraction_index,
+        //         check_objects,
+        //         lights.clone(),
+        //         next_depth,
+        //     )
+        // } else if cfg!(feature = "refractions") {
+        //     let interaction_point =
+        //         interaction.point + (refraction_direction * V::default_epsilon_distance());
+        //     let check_objects = check_objects.clone();
+        //     let lights = lights.clone();
+        //
+        //     match RAY_PROCESSING_POOL.install(|| {
+        //         Self::single_raytrace::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, true, _>(
+        //             interaction_point,
+        //             refraction_direction,
+        //             new_medium_refraction_index,
+        //             &check_objects,
+        //             lights,
+        //             next_depth,
+        //         )
+        //     }) {
+        //         Some(result) => Some(result),
+        //         None => None,
+        //     }
+        // } else {
+        //     None
+        // };
 
         impl_refraction_raytrace! {
             let refraction_color = single_raytrace(
@@ -394,17 +465,6 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             })
             .unwrap_or((ColorSimdExt::zero(), bool_false, zero));
 
-        // let absorption_coefficient = V::Scalar::from_subset(&0.05); // Adjust based on your scene scale
-        // // For colored glass, use color channels
-        // // let absorption_coefficient_rgb = interaction.material.color.to_vec3() * V::Scalar::from_subset(&0.1);
-        //
-        // // Apply absorption based on distance traveled inside the medium
-        // let transmittance = (-intersection_distance * absorption_coefficient).simd_exp();
-        // let refraction_with_absorption = refraction * transmittance;
-
-        // let distance_factor =
-        //     Self::attenuation_factor_based_on_distance::<V>(intersection_distance);
-
         let refraction_valid = refraction_valid & interaction.valid_mask & material_is_refractive;
 
         let refraction_boost = interaction
@@ -414,26 +474,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             .simd_unwrap_or(|| zero)
             + one;
 
-        // let refraction_opacity = interaction
-        //     .material
-        //     .transmission
-        //     .opacity()
-        //     .simd_unwrap_or(|| one)
-        //     .simd_clamp(zero, one - <V as Vector>::Scalar::default_epsilon());
-        // let material_absorption = interaction.material.absorption();
-
-        let (_, transmittancenc) =
-            interaction
-                .material
-                .compute_fresnel(inormal, view_dir, eta.simd_recip());
-
-        let refracted_light =
-            //refraction_with_absorption * distance_factor * refraction_boost * bsdf;
-            //refraction  * refraction_boost * bsdf; // fixme implement this right
-            refraction  * refraction_boost * transmittancenc;
-
-        // Combine material color with refracted light based on opacity
-        //let final_refraction = material_absorption.mix(refracted_light, refraction_opacity);
+        let refracted_light = refraction * refraction_boost * transmittance;
 
         ColorType::<V::Scalar>::blend(refraction_valid, &refracted_light, &ColorSimdExt::zero())
     }
@@ -469,9 +510,11 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             return ColorSimdExt::zero();
         }
 
-        // for transmissive materials, see if we have total internal reflection
+        // For transmissive materials, check for total internal reflection
         let cos_theta = view_dir.dot(interaction.normal);
         let is_inside_object = cos_theta.simd_lt(zero);
+
+        let inormal = V::blend(is_inside_object, -interaction.normal, interaction.normal);
 
         let interaction_refraction_index =
             *interaction.material.transmission.refraction_index().value();
@@ -485,6 +528,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             is_inside_object,
             start_refraction_index / new_medium_refraction_index,
         );
+
         // Check for total internal reflection
         let cos_theta_i = cos_theta.simd_abs();
         let sin_theta_t_squared = eta * eta * (one - cos_theta_i * cos_theta_i);
@@ -498,15 +542,49 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         }
 
         let reflection_direction = view_dir.reflected(interaction.normal).normalized();
+        let reflection_is_none = reflection_direction.abs_diff_eq_default(&V::broadcast(zero));
 
-        let inormal = V::blend(is_inside_object, -interaction.normal, interaction.normal);
+        if reflection_is_none.all() {
+            return ColorSimdExt::zero();
+        }
 
-        let bsdf = interaction.material.bsdf(
-            inormal,
-            -view_dir,
-            reflection_direction,
-            start_refraction_index,
-        );
+        // Calculate Fresnel reflectance
+        let (reflectance, _) =
+            interaction
+                .material
+                .compute_fresnel(inormal, -view_dir, start_refraction_index);
+
+        // let reflection_color = if cfg!(feature = "reflections") && IS_REFLECTION_RAY {
+        //     Self::single_raytrace::<IS_ANTIALIASING_RAY, true, IS_REFRACTION_RAY, _>(
+        //         interaction.point + (reflection_direction * V::default_epsilon_distance()),
+        //         reflection_direction,
+        //         start_refraction_index,
+        //         check_objects,
+        //         lights.clone(),
+        //         next_depth,
+        //     )
+        // } else if cfg!(feature = "reflections") {
+        //     let interaction_point =
+        //         interaction.point + (reflection_direction * V::default_epsilon_distance());
+        //     let check_objects = check_objects.clone();
+        //     let lights = lights.clone();
+        //
+        //     match RAY_PROCESSING_POOL.install(|| {
+        //         Self::single_raytrace::<IS_ANTIALIASING_RAY, true, IS_REFRACTION_RAY, _>(
+        //             interaction_point,
+        //             reflection_direction,
+        //             start_refraction_index,
+        //             &check_objects,
+        //             lights,
+        //             next_depth,
+        //         )
+        //     }) {
+        //         Some(result) => Some(result),
+        //         None => None,
+        //     }
+        // } else {
+        //     None
+        // };
 
         macro_rules! impl_reflection_raytrace {
             (
@@ -568,8 +646,6 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             };
         }
 
-        let reflection_is_none = reflection_direction.abs_diff_eq_default(&V::broadcast(zero));
-
         impl_reflection_raytrace! {
             let reflection_color = single_raytrace(
                 (interaction.point + (reflection_direction * V::default_epsilon_distance())),
@@ -594,14 +670,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
         let distance_factor = Self::attenuation_factor_based_on_distance::<V>(interaction_distance);
 
-        let (reflectance, _) =
-            interaction
-                .material
-                .compute_fresnel(inormal, -view_dir, start_refraction_index);
-
         ColorSimdExt::blend(
             reflection_valid,
-            //&(reflection * distance_factor * bsdf), //&(reflection * interaction.material.metallic),
             &(reflection * distance_factor * reflectance),
             &ColorSimdExt::zero(),
         )
@@ -624,7 +694,6 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     {
         let zero = V::Scalar::zero();
         let one = V::Scalar::one();
-
         if interaction.valid_mask.none() {
             return (ColorSimdExt::zero(), ColorSimdExt::zero());
         }
@@ -637,7 +706,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         let material_color = interaction.material.color.clone();
 
         // Calculate ambient lighting
-        let ambient_contribution = ColorType::blend(
+        let ambient_contribution = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::blend(
             interaction.valid_mask,
             &(material_color.clone() * ambient_light.color),
             &ColorSimdExt::zero(),
@@ -646,6 +715,9 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         // Calculate direct lighting from all point lights
         let mut light_color = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::zero();
         let mut specular_color = <ColorType<V::Scalar> as ColorSimdExt<V::Scalar>>::zero();
+
+        // Only calculate specular if the material has specular properties
+        let has_specular = interaction.material.shininess().simd_gt(V::Scalar::zero());
 
         for light in lights.clone() {
             // Create SIMD light
@@ -659,9 +731,9 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             let light_to_point = light_position - interaction.point;
             let light_dir = light_to_point.normalized();
 
-            // fixme translucent objects?
+            // Move point a bit away from the surface of the object
             let check_for_light_blocking_point =
-                interaction.point + (light_dir * V::default_epsilon_distance()); // move point a bit away from the surface of the object
+                interaction.point + (light_dir * V::default_epsilon_distance());
             let check_for_light_blocking_light_to_point =
                 light_position - check_for_light_blocking_point;
 
@@ -683,7 +755,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
 
             let light_color_simd = ColorSimdExt::blend(
                 light_can_reach_point,
-                &(contribution.color/* / obstacles_in_path_to_light.color_filter */), // fixme
+                &(contribution.color / obstacles_in_path_to_light.color_filter),
                 &contribution.color,
             );
             let light_intensity = contribution.intensity;
@@ -691,75 +763,59 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             // Calculate diffuse factor
             let diffuse_factor = interaction.normal.dot(light_dir).simd_max(zero);
 
-            // Calculate specular reflection
-            let reflection = light_dir.reflected(interaction.normal);
+            // Only calculate specular for materials with specular properties
+            let specular_factor = if !has_specular.none() {
+                // Calculate specular reflection
+                let reflection = light_dir.reflected(interaction.normal);
+                let specular = reflection
+                    .normalized()
+                    .dot(view_dir)
+                    .simd_max(zero)
+                    .simd_powf(
+                        (interaction.material.shininess() * V::Scalar::from_subset(&(512.0)))
+                            .simd_max(V::Scalar::one()),
+                    );
 
-            let specular_factor = reflection
-                .normalized()
-                .dot(view_dir)
-                .simd_max(zero)
-                .simd_powf(
-                    (interaction.material.shininess() * V::Scalar::from_subset(&(512.0)))
-                        .simd_max(V::Scalar::one()),
-                );
+                specular.select(has_specular, V::Scalar::zero())
+            } else {
+                V::Scalar::zero()
+            };
 
-            let specular = specular_factor.select(
-                interaction.material.shininess().simd_gt(V::Scalar::zero()),
-                V::Scalar::zero(),
-            );
             // Combined lighting for this light
-            let light_factor = (diffuse_factor)
+            let light_factor = diffuse_factor
                 * light_intensity
                 * obstacles_in_path_to_light
                     .combined_opacity
                     .select(light_can_reach_point, one);
+
             let specular_factor = light_intensity
                 * obstacles_in_path_to_light
                     .combined_opacity
-                    .select(light_can_reach_point, one);
+                    .select(light_can_reach_point, one)
+                * specular_factor;
 
             // Only apply light where the surface faces the light & is not blocked by the light
             let light_valid = diffuse_factor.simd_gt(zero) & light_can_reach_point;
 
-            // let bsdf = interaction
-            //     .material
-            //     .bsdf(interaction.normal, -view_dir, light_dir, one);
-
-            let specular_light = light.color * specular;
-
             let diffuse_contribution = material_color * light_color_simd * light_factor;
-            let specular_contribution = specular_light * specular_factor;
-
-            //println!("bsdf: {:?}", bsdf);
+            let specular_contribution = light.color * specular_factor;
 
             // Add light contribution
             light_color = light_color
                 + ColorType::blend(
                     light_valid & interaction.valid_mask,
-                    &(diffuse_contribution + specular_contribution),
+                    &diffuse_contribution,
                     &ColorSimdExt::zero(),
                 );
-            specular_color = specular_color
-                + ColorType::blend(
-                    light_valid & interaction.valid_mask,
-                    &(specular_contribution),
-                    &ColorSimdExt::zero(),
-                );
-        }
 
-        // todo calculate reflections of light sources on reflecting surfaces. E.g. a lamp shines on a mirror shall produce light reflected based on incident angle -> caustics
-        if cfg!(feature = "light_reflections") {
-            // for object in check_objects.get_all() {
-            //     let is_reflective = object.get_material().is_reflective();
-            //
-            //     if is_reflective.none() {
-            //         continue;
-            //     }
-            //
-            //     for light in lights.clone() {}
-            //
-            //     Raytracer::cast_ray(interaction.point)
-            // }
+            if !has_specular.none() {
+                specular_color = specular_color
+                    + ColorType::blend(
+                        light_valid & interaction.valid_mask & has_specular,
+                        &specular_contribution,
+                        &ColorSimdExt::zero(),
+                    );
+            }
         }
 
         // Combine ambient and direct lighting
@@ -955,39 +1011,49 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
             .expect("Has enough rays");
         let bundle_iter = bundle_iter.chunks_exact(<V as Vector>::LANES);
 
-        let random_iter = if cfg!(feature = "anti_aliasing_randomness") {
-            [[0.0; 2]]
-                .into_iter()
-                .chain(
-                    Poisson2D::new()
-                        .with_dimensions([1.2, 1.2], (3.0 / total_rays as f32))
-                        .with_samples(total_rays as u32)
-                        .into_iter()
-                        .take(total_rays - 1), // only return TOTAL_RAYS -1 because we defined the 1st point in the iterator to be 0 to sample at the exact position of the ray
-                )
-                .pad_using(total_rays, |_| -> fast_poisson::Point<2> {
-                    let random_vec = Vec3::sample_random() * 1.15;
-                    [random_vec.x, random_vec.y]
-                })
-                .map(|p| -> fast_poisson::Point<2> {
-                    [
-                        p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
-                        p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
-                    ]
-                })
-                .collect::<Vec<_>>()
-        } else {
-            [[0.0; 2]]
-                .into_iter()
-                .chain([[1.0; 2]; Self::get_total_rays::<V>() - 1])
-                .map(|p| -> fast_poisson::Point<2> {
-                    [
-                        p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
-                        p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
-                    ]
-                })
-                .collect::<Vec<_>>()
-        };
+        // let random_iter = if cfg!(feature = "anti_aliasing_randomness") {
+        //     [[0.0; 2]]
+        //         .into_iter()
+        //         .chain(
+        //             Poisson2D::new()
+        //                 .with_dimensions([1.2, 1.2], (3.0 / total_rays as f32))
+        //                 .with_samples(total_rays as u32)
+        //                 .into_iter()
+        //                 .take(total_rays - 1), // only return TOTAL_RAYS -1 because we defined the 1st point in the iterator to be 0 to sample at the exact position of the ray
+        //         )
+        //         .pad_using(total_rays, |_| -> fast_poisson::Point<2> {
+        //             let random_vec = Vec3::sample_random() * 1.15;
+        //             [random_vec.x, random_vec.y]
+        //         })
+        //         .map(|p| -> fast_poisson::Point<2> {
+        //             [
+        //                 p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
+        //                 p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
+        //             ]
+        //         })
+        //         .collect::<Vec<_>>()
+        // } else {
+        //     [[0.0; 2]]
+        //         .into_iter()
+        //         .chain([[1.0; 2]; Self::get_total_rays::<V>() - 1])
+        //         .map(|p| -> fast_poisson::Point<2> {
+        //             [
+        //                 p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
+        //                 p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
+        //             ]
+        //         })
+        //         .collect::<Vec<_>>()
+        // };
+        let random_iter = ANTIALIASING_SAMPLES
+            .iter()
+            .map(|p| -> fast_poisson::Point<2> {
+                [
+                    p[0] * WINDOW_TO_SCENE_WIDTH_FACTOR * scale_factor,
+                    p[1] * WINDOW_TO_SCENE_HEIGHT_FACTOR * scale_factor,
+                ]
+            })
+            .take(total_rays)
+            .collect::<Vec<_>>();
 
         let random_iter = random_iter.chunks(<V as Vector>::LANES);
 

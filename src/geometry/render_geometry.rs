@@ -154,6 +154,25 @@ where
     }
 }
 
+impl<V: Vector<Scalar: SimdValueRealSimplified>> FromIterator<RenderGeometry<V>>
+    for GeometryCollection<V>
+{
+    fn from_iter<T: IntoIterator<Item = RenderGeometry<V>>>(iter: T) -> Self {
+        Self {
+            geometries: iter.into_iter().fold(
+                HashMap::<RenderGeometryKind, Vec<RenderGeometry<V>>>::new(),
+                |mut acc, obj| {
+                    let kind = obj.variant_discriminant();
+                    if !acc.contains_key(&kind) {
+                        acc.insert(kind.clone(), vec![]);
+                    }
+                    acc.get_mut(&kind).unwrap().push(obj);
+                    acc
+                },
+            ),
+        }
+    }
+}
 impl<V: Vector<Scalar: SimdValueRealSimplified>> Deref for GeometryCollection<V> {
     type Target = HashMap<RenderGeometryKind, Vec<RenderGeometry<V>>>;
 
