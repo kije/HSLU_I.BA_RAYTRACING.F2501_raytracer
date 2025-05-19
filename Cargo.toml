@@ -19,6 +19,10 @@ path = "examples/test_scene.rs"
 name = "test_text"
 path = "examples/test_text.rs"
 
+[[example]]
+name = "semesterbild"
+path = "examples/semesterbild.rs"
+
 [dependencies]
 minifb = "0.28"
 rayon = "1.10"
