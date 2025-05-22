@@ -134,13 +134,29 @@ impl<V: RenderingVector + NormalizableVector + SimdCapableVector> Intersectable<
         // Compute the surface normal at the intersection point
         let normal = (intersection_point - self.center).normalized();
 
+        let is_visible_face = if cfg!(feature = "backface_culling") {
+            let is_visible_face = ray
+                .direction
+                .dot(normal)
+                .simd_lt(V::Scalar::from_subset(&(0.75)))
+                | self.material.transmission.mask();
+
+            if is_visible_face.none() {
+                return None;
+            }
+
+            is_visible_face
+        } else {
+            true.into()
+        };
+
         // Create the surface interaction
         Some(SurfaceInteraction::new(
             intersection_point,
             normal,
             final_t,
             self.material.clone(),
-            final_t_valid,
+            is_visible_face & final_t_valid,
             self.object_id,
         ))
     }

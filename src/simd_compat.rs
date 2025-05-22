@@ -101,7 +101,9 @@ impl<V> SimdValueSignedSimplified for V where
 
 pub trait SimdValueRealSimplified:
     SimdValueSignedSimplified<
-        Element: Float + AbsDiffEq<Output = bool, Epsilon = <Self as SimdValue>::Element>,
+        Element: Float
+                     + AbsDiffEq<Output = bool, Epsilon = <Self as SimdValue>::Element>
+                     + SupersetOf<f32>,
         SimdBool: BitOps,
     > + SimdRealField
     + AbsDiffEq<Output = Self::SimdBool, Epsilon = Self>
@@ -126,7 +128,9 @@ pub trait SimdValueRealSimplified:
 
 impl<V> SimdValueRealSimplified for V where
     V: SimdValueSignedSimplified<
-            Element: Float + AbsDiffEq<Output = bool, Epsilon = <Self as SimdValue>::Element>,
+            Element: Float
+                         + AbsDiffEq<Output = bool, Epsilon = <Self as SimdValue>::Element>
+                         + SupersetOf<f32>,
             SimdBool: BitOps,
         > + SimdRealField
         + AbsDiffEq<Output = Self::SimdBool, Epsilon = Self>

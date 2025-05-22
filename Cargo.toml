@@ -55,13 +55,13 @@ enumcapsulate = "0.6.2"
 tobj = { version = "4.0.3", features = ["reordering", "merging"] }
 
 fast_poisson = { version = "1.0.2", features = ["single_precision"] }
-
+png = "0.17.16"
 [dev-dependencies]
 assert_float_eq = "1.1"
 
 [features]
 # default = ["high_quality", "realistic", "anti_aliasing", "medium_resolution"]
-default = ["realistic", "anti_aliasing", "high_quality", "high_resolution"]
+default = ["realistic", "save_rendering_image", "scene_backface_culling", "anti_aliasing_randomness", "anti_aliasing_rotation_scale", "medium_resolution", "high_quality"]
 simd_render = []
 simulate_slow_render = []
 render_timing_debug = ["incr_stats"]
@@ -74,6 +74,9 @@ soft_shadows = []
 reflections = []
 light_reflections = []
 refractions = []
+backface_culling = []
+scene_backface_culling = []
+save_rendering_image = []
 realistic = ["reflections", "light_reflections", "refractions"]
 high_quality_model = []
 high_quality = ["anti_aliasing", "soft_shadows", "high_quality_model"]

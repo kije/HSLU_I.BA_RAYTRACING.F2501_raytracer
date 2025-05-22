@@ -1,10 +1,12 @@
-use crate::helpers::{Pixel, RenderTiming};
+use crate::helpers::{ColorType, Pixel, RenderTiming};
 use crate::image_buffer::ImageBuffer;
 use crate::output::{Output, OutputColorEncoder, OutputInteractive};
+use crate::{WINDOW_HEIGHT, WINDOW_SCENE_DEPTH, WINDOW_WIDTH};
 use minifb::{
     CursorStyle, HasWindowHandle, Key, Result as WindowResult, Scale, ScaleMode, Window,
     WindowOptions,
 };
+use palette::rgb::Rgb;
 use std::thread;
 
 #[derive(Debug)]
@@ -55,31 +57,8 @@ impl<const W: usize, const H: usize> WindowOutput<W, H> {
         window.inner.window.set_cursor_style(CursorStyle::Crosshair);
         window.inner.window.set_title(
             format!(
-                "Raytracer - {} | {}",
-                if cfg!(feature = "simd_render") {
-                    "SIMD"
-                } else {
-                    "Non-SIMD"
-                },
-                if cfg!(feature = "anti_aliasing") {
-                    format!(
-                        "Antialiasing {} {}",
-                        if cfg!(feature = "anti_aliasing_rotation_scale") {
-                            "ROS_SCL"
-                        } else {
-                            ""
-                        },
-                        if cfg!(feature = "anti_aliasing_randomness") {
-                            "RNG"
-                        } else {
-                            ""
-                        }
-                    )
-                    .trim()
-                    .to_string()
-                } else {
-                    "Non-Antialiasing".to_string()
-                }
+                "Raytracer - {}",
+                WindowOutputInner::<W, H>::get_feature_string()
             )
             .trim(),
         );
@@ -127,5 +106,10 @@ impl OutputColorEncoder for WindowColorEncoder {
     #[inline(always)]
     fn to_output(pixel: &Pixel) -> u32 {
         u32::from(pixel.0.into_format::<u8>())
+    }
+
+    #[inline(always)]
+    fn from_output(pixel: u32) -> Pixel {
+        ColorType::from(pixel).into_format::<f32>().into()
     }
 }

@@ -30,6 +30,11 @@ impl From<(u8, u8, u8)> for Pixel {
         Self::new(r, g, b)
     }
 }
+impl From<ColorType> for Pixel {
+    fn from(color: ColorType) -> Self {
+        Self(color)
+    }
+}
 
 impl Deref for Pixel {
     type Target = ColorType;

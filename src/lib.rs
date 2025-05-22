@@ -1,8 +1,8 @@
 #![feature(generic_const_exprs)]
 #![feature(concat_idents)]
 #![feature(likely_unlikely)]
+#![feature(path_file_prefix)]
 #![allow(incomplete_features)]
-extern crate core;
 
 use ultraviolet::Vec3;
 

@@ -1,10 +1,13 @@
 #![feature(generic_const_exprs)]
 #![feature(concat_idents)]
 #![feature(likely_unlikely)]
+#![feature(path_file_prefix)]
 #![allow(incomplete_features)]
 
+use rayon::iter::IntoParallelRefIterator;
 use raytracer::geometry::{BoundedPlane, CompositeGeometry, SphereData};
 use raytracer::helpers::ColorType;
+use raytracer::output::{FileColorEncoder, FileOutput, OutputColorEncoder};
 use raytracer::raytracing::{Material, TransmissionProperties};
 use raytracer::scene::{PointLight, Scene};
 use raytracer::{
@@ -15,7 +18,9 @@ use raytracer::{
     renderer::{RaytracerRenderer, Renderer},
 };
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
+use std::time::Instant;
 use ultraviolet::{Isometry3, Rotor3, Similarity3, Vec3};
 
 fn main() {
@@ -24,9 +29,9 @@ fn main() {
 
     let mut scene = Scene::<Vec3>::from_obj::<_, true>(
         if cfg!(feature = "high_quality_model") || cfg!(feature = "medium_resolution") {
-            "../data/obj/text/text.obj"
+            "./data/obj/text/text.obj"
         } else {
-            "../data/obj/text/text_lowres.obj"
+            "./data/obj/text/text_lowres.obj"
         },
         Some(Similarity3::new(
             Vec3::new(
@@ -50,8 +55,8 @@ fn main() {
         Material::new(
             ColorType::new(1.0, 0.8, 1.0),
             0.0,
-            0.1,
-            TransmissionProperties::new(0.99, 1.5),
+            0.15,
+            TransmissionProperties::new_with_boost(0.99, 1.5, 0.025),
         ),
     ));
 
@@ -71,7 +76,7 @@ fn main() {
         0.07 * AVERAGE_SCENE_DIMENSION,
         Material::new(
             ColorType::new(0.75, 0.9, 0.8),
-            0.001,
+            0.2,
             0.35,
             TransmissionProperties::new(0.6, 1.8),
         ),
@@ -94,7 +99,7 @@ fn main() {
             ColorType::new(0.88, 0.9, 0.88),
             0.0,
             0.1,
-            TransmissionProperties::new(1.0, 1.4),
+            TransmissionProperties::new_with_boost(1.0, 1.42, 0.125),
         ),
     ));
 
@@ -176,18 +181,18 @@ fn main() {
         Vec3::unit_y().rotated_by(rotor),
         isometry.transform_vec(Vec3::new(
             SCENE_WIDTH * 0.5,
-            SCENE_HEIGHT,
+            SCENE_HEIGHT + 0.001,
             SCENE_DEPTH as f32 * 0.5,
         )),
         Vec3::unit_z().rotated_by(rotor),
         SCENE_WIDTH,
         SCENE_DEPTH,
-        0.01 * SCENE_DEPTH,
+        0.012 * SCENE_DEPTH,
         Material::new(
             ColorType::new(0.75, 0.5, 0.75),
             0.0,
             0.7,
-            TransmissionProperties::new(0.6, 1.125),
+            TransmissionProperties::new(0.675, 1.13),
         ),
     )
     .to_basic_geometries();
@@ -224,9 +229,9 @@ fn main() {
         SCENE_DEPTH,
         0.01 * SCENE_DEPTH,
         Material::new(
-            ColorType::new(0.85, 0.85, 0.6),
-            0.5,
-            0.5,
+            ColorType::new(0.875, 0.85, 0.61),
+            0.55,
+            0.325,
             TransmissionProperties::none(),
         ),
     )
@@ -256,7 +261,7 @@ fn main() {
         PointLight::new(
             Vec3::new(SCENE_WIDTH / 2.4, SCENE_HEIGHT * 0.1, 0.08 * SCENE_DEPTH),
             ColorType::new(0.825, 0.675, 0.65),
-            0.65,
+            0.675,
         )
         .into(),
     );
@@ -265,7 +270,7 @@ fn main() {
         PointLight::new(
             Vec3::new(SCENE_WIDTH, SCENE_HEIGHT, 0.01 * SCENE_DEPTH),
             ColorType::new(0.825, 0.35, 0.8),
-            0.42,
+            0.435,
         )
         .into(),
     );
@@ -277,7 +282,7 @@ fn main() {
                 SCENE_DEPTH as f32 * 0.75,
             )),
             ColorType::new(1.0, 1.0, 1.0),
-            0.25,
+            0.2775,
         )
         .into(),
     );
@@ -285,7 +290,7 @@ fn main() {
         PointLight::new(
             Vec3::new(0.2 * SCENE_WIDTH, SCENE_HEIGHT * 0.67, 0.95 * SCENE_DEPTH),
             ColorType::new(0.825, 0.5, 0.7),
-            0.25,
+            0.26,
         )
         .into(),
     );
@@ -308,14 +313,31 @@ fn main() {
     //     .into(),
     // );
 
+    let scene = if cfg!(feature = "scene_backface_culling") {
+        Scene::<Vec3>::backface_culling(scene, Vec3::unit_z())
+    } else {
+        scene
+    };
+
+    println!(
+        "Num of obj in scene: {}",
+        scene.scene_objects.get_all().count()
+    );
+
     let buffer = Arc::new(ImageBuffer::<WINDOW_WIDTH, WINDOW_HEIGHT>::new());
 
     let buffer_render = buffer.clone();
+
     thread::spawn(move || {
         let mut start = RenderTiming::default();
         RaytracerRenderer::<WindowColorEncoder>::default().render(&buffer_render, &scene);
         start.next();
         println!("Render timing done! {:?}", start);
+
+        if cfg!(feature = "save_rendering_image") {
+            FileOutput::<WINDOW_WIDTH, WINDOW_HEIGHT, _>::new("./output.png")
+                .render_buffer(buffer_render.as_ref())
+        }
     });
 
     let mut output =

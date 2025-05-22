@@ -143,10 +143,12 @@ impl<V: RenderingVector<Scalar: SimdValueRealSimplified>> Scene<V> {
                 .into_iter()
                 .filter(|object| match object {
                     RenderGeometry::Sphere(_) => true,
-                    RenderGeometry::Triangle(triangle) => triangle
-                        .normal
-                        .dot(view_direction)
-                        .abs_diff_ne_default(&0.0),
+                    RenderGeometry::Triangle(triangle) => {
+                        if triangle.material.transmission.mask() {
+                            return true;
+                        }
+                        triangle.normal.dot(view_direction).abs_diff_ne(&1.0, 0.01)
+                    }
                 })
                 .collect(),
         }

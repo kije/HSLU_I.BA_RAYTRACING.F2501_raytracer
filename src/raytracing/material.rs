@@ -55,7 +55,7 @@ impl<S: SimdValueRealSimplified> TransmissionProperties<S> {
     }
 
     pub fn opacity(&self) -> SimdOption<S> {
-        self.opacity
+        SimdOption::new(*self.opacity.value(), self.mask())
     }
 
     pub fn boost(&self) -> SimdOption<S> {

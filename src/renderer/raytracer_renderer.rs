@@ -54,9 +54,9 @@ use wide::f32x4;
 
 const RAYTRACE_REFLECTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
     if cfg!(feature = "extreme_quality") {
-        28
+        21
     } else {
-        18
+        13
     }
 } else {
     9
@@ -64,9 +64,9 @@ const RAYTRACE_REFLECTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
 
 const RAYTRACE_REFRACTION_MAX_DEPTH: usize = if cfg!(feature = "high_quality") {
     if cfg!(feature = "extreme_quality") {
-        25
+        21
     } else {
-        17
+        18
     }
 } else {
     8
@@ -77,23 +77,19 @@ const POINT_LIGHT_MULTIPLICATOR: usize = if cfg!(feature = "soft_shadows") {
         if cfg!(feature = "extreme_quality") {
             28
         } else {
-            18
+            19
         }
     } else {
-        8
+        10
     }
 } else {
     1
 };
 
-const ANTIALIASING_SAMPLES_PER_PIXEL: usize = if cfg!(feature = "high_quality") {
-    if cfg!(feature = "extreme_quality") {
-        45
-    } else {
-        27
-    }
+const ANTIALIASING_SAMPLES_PER_PIXEL: usize = if cfg!(feature = "extreme_quality") {
+    24
 } else {
-    8
+    9
 };
 
 // Thread pool for ray processing
@@ -107,9 +103,12 @@ static RAY_PROCESSING_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
 
 // Pre-calculated antialiasing samples for faster access
 static ANTIALIASING_SAMPLES: LazyLock<Vec<[f32; 2]>> = LazyLock::new(|| {
-    let total_rays = ANTIALIASING_SAMPLES_PER_PIXEL.next_multiple_of(8);
+    // sample the first 9 points without randomness (from the 9x9 grid)
+    let mut samples = vec![[0.0, 0.0]];
+    samples.extend(vec![[1.0, 1.0]; 8]);
+
+    let total_rays = (ANTIALIASING_SAMPLES_PER_PIXEL).next_multiple_of(8);
     if cfg!(feature = "anti_aliasing_randomness") {
-        let mut samples = vec![[0.0, 0.0]];
         samples.extend(
             Poisson2D::new()
                 .with_dimensions([1.2, 1.2], (3.0 / total_rays as f32))
@@ -119,10 +118,12 @@ static ANTIALIASING_SAMPLES: LazyLock<Vec<[f32; 2]>> = LazyLock::new(|| {
         );
         samples
     } else {
-        let mut samples = vec![[0.0, 0.0]];
-        samples.extend(vec![[1.0, 1.0]; total_rays - 1]);
+        samples.extend(vec![[1.0, 1.0]; total_rays]);
         samples
     }
+    .into_iter()
+    .take(total_rays)
+    .collect()
 });
 
 trait SceneLightIterator<'a, V: 'a + SimdRenderingVector>:
@@ -171,7 +172,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
     {
         // Early recursion depth check
         if let Some(recursion_depth) = recursion_depth {
-            if recursion_depth == 0 {
+            if recursion_depth <= 0 {
                 return None;
             }
         }
@@ -317,6 +318,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     $check_objects:expr,
                     $lights:expr,
                     $recursion_depth:expr,
+                    | depth_reduction_step_size: $reduction_step: expr,
+                    | depth_factor: $depth_factor: expr
                 ) $(if $condition:expr)?
             ) => {
                 let $refraction_contribution = if cfg!(feature = "refractions") $( && $condition)?  {
@@ -328,7 +331,9 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                             $start_refraction_index,
                             $check_objects,
                             $lights,
-                            $recursion_depth
+                            $recursion_depth,
+                            $reduction_step,
+                            $depth_factor
                         )
                     } else {
                         let lights = ($lights).clone();
@@ -344,7 +349,9 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                                 start_refraction_index,
                                 &check_objects,
                                 lights,
-                                $recursion_depth
+                                $recursion_depth,
+                                $reduction_step,
+                                $depth_factor
                             )
                         })
                         .join()
@@ -354,7 +361,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     None
                 };
             };
-            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $start_refraction_index:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr) => {
+            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $start_refraction_index:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr, $reduction_step: expr, $depth_factor: expr) => {
                 Self::$single_raytrace::<IS_ANTIALIASING_RAY, IS_REFLECTION_RAY, true, _>(
                     $interaction_point,
                     $light_dir,
@@ -362,8 +369,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     $check_objects,
                     $lights,
                     $recursion_depth
-                        .map(|d| d - 1)
-                        .or(Some(RAYTRACE_REFRACTION_MAX_DEPTH)),
+                        .map(|d| (d.saturating_sub($reduction_step)).max(0))
+                        .or(Some(RAYTRACE_REFRACTION_MAX_DEPTH / $depth_factor)),
                 )
             };
         }
@@ -391,7 +398,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 .material
                 .compute_fresnel(inormal, view_dir, eta.simd_recip());
 
-        let has_transmittance = transmittance.abs_diff_eq_default_any(&ColorSimdExt::zero());
+        // let has_transmittance = transmittance.abs_diff_eq_default_any(&ColorSimdExt::zero());
 
         // if has_transmittance.none() {
         //     return ColorSimdExt::zero();
@@ -448,6 +455,41 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
         //     None
         // };
 
+        let max_opacity = interaction
+            .material
+            .transmission
+            .opacity()
+            .simd_unwrap_or(|| zero)
+            .simd_horizontal_max();
+        let depth_reduction_step_size = if max_opacity
+            .simd_lt(<<V as Vector>::Scalar as SimdValue>::Element::from_subset(
+                &0.5f32,
+            ))
+            .all()
+        {
+            2
+        } else {
+            1
+        };
+
+        let depth_factor = if max_opacity
+            .simd_le(<<V as Vector>::Scalar as SimdValue>::Element::from_subset(
+                &0.3f32,
+            ))
+            .all()
+        {
+            3
+        } else if max_opacity
+            .simd_lt(<<V as Vector>::Scalar as SimdValue>::Element::from_subset(
+                &0.5f32,
+            ))
+            .all()
+        {
+            2
+        } else {
+            1
+        };
+
         impl_refraction_raytrace! {
             let refraction_color = single_raytrace(
                 (interaction.point + (refraction_direction * V::default_epsilon_distance())),
@@ -456,6 +498,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 check_objects,
                 lights.clone(),
                 recursion_depth,
+                | depth_reduction_step_size: (depth_reduction_step_size),
+                | depth_factor: (depth_factor)
             )
         }
 
@@ -595,6 +639,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     $check_objects:expr,
                     $lights:expr,
                     $recursion_depth:expr,
+                    | depth_reduction_step_size: $reduction_step: expr,
+                    | depth_factor: $depth_factor: expr
                 ) $(if $condition:expr)?
             ) => {
                 let $reflection_contribution = if cfg!(feature = "reflections") $( && $condition)?  {
@@ -606,7 +652,9 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                             $start_refraction_index,
                             $check_objects,
                             $lights,
-                            $recursion_depth
+                            $recursion_depth,
+                            $reduction_step,
+                            $depth_factor
                         )
                     } else {
                         let lights = ($lights).clone();
@@ -622,7 +670,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                                 start_refraction_index,
                                 &check_objects,
                                 lights,
-                                $recursion_depth
+                                $recursion_depth,
+                                $reduction_step, $depth_factor
                             )
                         })
                         .join()
@@ -632,7 +681,7 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     None
                 };
             };
-            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $start_refraction_index:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr) => {
+            ($single_raytrace:ident, $interaction_point:expr, $light_dir:expr, $start_refraction_index:expr, $check_objects:expr, $lights:expr, $recursion_depth:expr, $reduction_step: expr, $depth_factor: expr) => {
                 Self::$single_raytrace::<IS_ANTIALIASING_RAY, true, IS_REFRACTION_RAY, _>(
                     $interaction_point,
                     $light_dir,
@@ -640,8 +689,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                     $check_objects,
                     $lights,
                     $recursion_depth
-                        .map(|d| d - 1)
-                        .or(Some(RAYTRACE_REFLECTION_MAX_DEPTH)),
+                        .map(|d| (d.saturating_sub($reduction_step)).max(0))
+                        .or(Some(RAYTRACE_REFLECTION_MAX_DEPTH / $depth_factor)),
                 )
             };
         }
@@ -654,6 +703,8 @@ impl<C: OutputColorEncoder> RaytracerRenderer<C> {
                 check_objects,
                 lights.clone(),
                 recursion_depth,
+                | depth_reduction_step_size: (1),
+                | depth_factor: (1)
             ) if (reflection_is_none.none())
         }
 

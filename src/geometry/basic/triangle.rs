@@ -151,6 +151,22 @@ impl<
         let one = V::Scalar::one();
         let epsilon = V::Scalar::simd_default_epsilon();
 
+        let is_visible_face = if cfg!(feature = "backface_culling") {
+            let is_visible_face = ray
+                .direction
+                .dot(self.normal)
+                .simd_lt(V::Scalar::from_subset(&(0.75)))
+                | self.material.transmission.mask();
+
+            if is_visible_face.none() {
+                return None;
+            }
+
+            is_visible_face
+        } else {
+            true.into()
+        };
+
         let edge1 = self.edge1;
         let edge2 = self.edge2;
         let b = self.vertex1 - ray.origin;
@@ -174,7 +190,8 @@ impl<
 
         // Check if u, v are in valid range for barycentric coordinates
         let uv_invalid = u.simd_lt(zero) | v.simd_lt(zero) | (u + v).simd_ge(one);
-        let valid_mask = !(t_invalid | uv_invalid) & !mat_det.abs_diff_eq_default(&zero);
+        let valid_mask =
+            is_visible_face & !(t_invalid | uv_invalid) & !mat_det.abs_diff_eq_default(&zero);
 
         if valid_mask.none() {
             return None;
